@@ -1,0 +1,39 @@
+# cargo-deny configuration — license/security/dependency hygiene.
+# See https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+yanked = "warn"
+# RUSTSEC-2024-0436: `paste` is unmaintained. No safe upgrade exists; it is a
+# widely-used, stable macro crate pulled in transitively by `faer`'s BLAS kernels.
+ignore = ["RUSTSEC-2024-0436"]
+
+[licenses]
+# All workspace crates are MIT OR Apache-2.0. The allow-list also permits the
+# permissive licenses of transitive dependencies pulled in by dev/build tooling.
+# NOTE: some wrap targets identified in ../registry.toml (e.g. rapier, SciRS2,
+# possibly QuantRS2) are Apache-2.0-ONLY, not dual-licensed. That's fine as a
+# dependency of an MIT-OR-Apache-2.0 crate, but re-check this list against
+# registry.toml's [[external]] entries whenever a new one is added.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"

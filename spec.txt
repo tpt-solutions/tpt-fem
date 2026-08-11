@@ -1,0 +1,181 @@
+DESIGN DOCUMENT: tpt-fem (FINITE ELEMENT METHOD)
+
+BEFORE YOU WRITE ANYTHING BELOW: check tpt-rust-map/registry.toml (in the
+sibling tpt-rust-map repo) for an existing foundation or external crate
+before adding a new one here. Every crate name in this repo carries the
+tpt-fem- prefix. A crate is only a valid wrap target if its CURRENT
+license is MIT OR Apache-2.0 (or more permissive) — Apache-2.0-ONLY is
+always disqualifying, no exceptions (see tpt-rust-map/docs/adr/0007). If
+it passes that check, default to wrapping; reimplementation still needs
+one written reason (no_std/alloc gap upstream, or a determinism need
+upstream doesn't meet). Prefer many small crates + a thin umbrella crate
+over one broad crate. Every crate: license = "MIT OR Apache-2.0".
+
+tpt-fem is NOT one of tpt-rust-map's original pillar repos (Math, Science,
+Engineering, Formal, Geometry). It graduated per ADR 0002's graduation
+clause out of ADR 0004's "unstructured FEM deferred" decision — see
+tpt-rust-map/docs/adr/0009-tpt-fem-graduates-from-adr-0004.md for the full
+history. That means this repo does not get a tpt-rust-map/repos/tpt-fem/
+draft copy; this file is the only spec.txt for it.
+
+PROJECT OVERVIEW
+tpt-fem is a mesh-based finite element method (FEM) core for Rust: Gauss
+quadrature, isoparametric shape functions, mesh data structures, and a
+sparse-matrix assembly adapter, with thermal and structural physics
+modules built on top. It exists because no maintained, general-purpose
+Rust FEM framework exists today — the closest attempt (fenris) has been
+unmaintained since 2023, and the only serious 2026 effort at "full"
+unstructured FEM (FrankenSim: 100+ crates, 160k+ LOC, SDF/cut-cell
+geometry-optimization architecture) is both a different, much larger
+problem than a conventional mesh-based FEM toolkit and disqualified as a
+wrap target outright (custom "MIT + OpenAI/Anthropic rider" license, not
+plain MIT/Apache-2.0 — see tpt-rust-map/registry.toml's [[external]] entry
+for FrankenSim).
+
+ECOSYSTEM GAP JUSTIFICATION
+Most of the linear-algebra and I/O substrate this repo needs already has a
+mature, permissively-licensed answer in the Rust ecosystem (2026) — this
+repo wraps those instead of rebuilding them:
+- nalgebra / faer (dense + sparse linear algebra, dual MIT/Apache-2.0) —
+  faer specifically covers sparse LU/Cholesky/CG/GMRES now, which is what
+  tpt-fem-sparse's solve backend uses.
+- spade (2D Delaunay/CDT meshing) and mshio (Gmsh .msh v4.1 parser) — both
+  mature/functional and permissively licensed. mshio is unmaintained since
+  2020 but the format is stable; revisit if it breaks.
+- vtkio (VTK read/write, dual MIT/Apache-2.0) — feature-complete, actively
+  maintained; wrapped by tpt-fem-io-vtk for ParaView export.
+- argmin (general optimization, dual MIT/Apache-2.0) — the same crate
+  tpt-math-optimize-general wraps; tpt-fem-solve reuses that integration
+  pattern for residual-based Newton-Raphson rather than re-wrapping argmin
+  from scratch.
+
+Genuine gaps this repo fills instead of wrapping:
+- Quadrature rules + isoparametric shape functions (tpt-fem-quadrature,
+  tpt-fem-element): no maintained, general-purpose crate provides these.
+- A maintained sparse-assembly framework (tpt-fem-sparse, tpt-fem-assembly):
+  fenris attempted this and is now unmaintained.
+- A sparse eigensolver for modal/vibration analysis (tpt-fem-eigen):
+  arpack-ng bindings are stale (last release 2023); nothing else in Rust
+  covers large sparse eigenproblems.
+- Exodus II and Abaqus .inp file I/O (tpt-fem-io-exodus, tpt-fem-io-abaqus):
+  nothing exists in Rust today for either format.
+- Native 3D quality tet-mesh generation is a known, currently-unfilled gap
+  too, but is explicitly OUT OF SCOPE here: the only mature option
+  (tritet, wrapping TetGen) is AGPL, disqualified under this repo's
+  MIT-OR-Apache-2.0-only policy. Phase 1 sidesteps this entirely by
+  importing externally-generated meshes (Gmsh .msh) rather than generating
+  them in-process; revisit only if that proves insufficient.
+
+CORE PRINCIPLES
+Wrap, don't rebuild, by default — same rule as every other tpt-solutions
+foundation repo (see tpt-rust-map/spec.txt's DECISION CHECKLIST). Physics-
+agnostic core (quadrature, elements, mesh, sparse assembly) with thermal
+and structural physics as separate crates built on top, not baked into the
+core. Many small crates + a thin umbrella crate. Every crate dual-licensed
+MIT OR Apache-2.0. Stay narrower than FrankenSim's scope deliberately —
+mesh-based, not SDF/cut-cell; assembled global sparse systems, not implicit
+geometry-optimization adjoints.
+
+tpt-fem-mesh uses minimal internal geometry types (node coordinates,
+Jacobian/determinant math) for now, not a dependency on tpt-geom — because
+tpt-geom does not exist yet (draft-only in tpt-rust-map/repos/tpt-geom/ as
+of this writing). Once tpt-geom-primitives/tpt-geom-predicates exist and
+are usable, tpt-fem-mesh should migrate onto them for robust geometric
+types and orientation predicates (element-quality/inverted-element
+detection is exactly what tpt-geom-predicates is designed for). This is a
+tracked follow-up, not a blocking dependency — tpt-fem does not wait on a
+sibling pillar that hasn't started.
+
+tpt-fem-elasticity (Phase 3, continuum FEM) is complementary to, not a
+duplicate of, tpt-engineering's tpt-eng-structural (analytical beam/frame/
+load-calculation methods, see ADR 0008): the latter is closed-form/
+matrix-structural-analysis methods for standard members, the former is
+general continuum discretization for arbitrary geometry. State this
+boundary again in tpt-eng-structural's own spec.txt when that crate is
+written.
+
+CRATE INVENTORY
+
+Phase 1 — core (build now):
+
+  tpt-fem-quadrature
+    Build. Gauss quadrature rules (points + weights) for reference
+    elements: line, triangle, quadrilateral, tetrahedron, hexahedron.
+    No internal deps.
+
+  tpt-fem-element
+    Build. Reference element definitions, Lagrange P1 shape functions and
+    local derivatives, isoparametric Jacobian mapping (reference to
+    physical coordinates). Depends on: tpt-fem-quadrature. P2/quadratic
+    shape functions are a tracked follow-up (see todo.md), not implemented
+    in this pass.
+
+  tpt-fem-mesh
+    Wrap mshio for Gmsh .msh v4.1 import; build the mesh data structures,
+    DOF numbering, and manual mesh-builder API on top. Depends on: none
+    internally (uses its own minimal geometry types — see CORE PRINCIPLES
+    above for the planned tpt-geom migration).
+
+  tpt-fem-sparse
+    Wrap faer for the sparse solve backend; build the FEM-specific COO
+    triplet accumulator (duplicate-summing during assembly, which none of
+    nalgebra-sparse/faer/sprs provide out of the box) and CSR conversion
+    on top. Depends on: none internally.
+
+  tpt-fem (umbrella)
+    Re-exports quadrature + element + mesh + sparse behind Cargo features.
+
+Phase 2 — assembly + first physics (not yet built):
+
+  tpt-fem-assembly
+    Build. Element-to-global scatter, boundary condition application
+    (Dirichlet elimination/penalty, Neumann/Robin). Depends on:
+    tpt-fem-sparse, tpt-fem-element, tpt-fem-mesh.
+
+  tpt-fem-thermal
+    Build. Heat conduction / Poisson element formulations — the simplest
+    complete physics for validating the full pipeline end-to-end. Depends
+    on: tpt-fem-assembly.
+
+  tpt-fem-io-vtk
+    Wrap vtkio. ParaView-compatible result export. Depends on:
+    tpt-fem-mesh.
+
+Phase 3 — structural + nonlinear (not yet built):
+
+  tpt-fem-elasticity
+    Build. Bar/beam/plane-stress/plane-strain/3D continuum linear
+    elasticity elements. Depends on: tpt-fem-assembly.
+
+  tpt-fem-solve
+    Wrap argmin (reusing tpt-math-optimize-general's integration pattern)
+    for Newton-Raphson orchestration; build arc-length/continuation
+    solving on top — no Rust crate provides continuation solvers today.
+    Depends on: tpt-fem-assembly.
+
+Phase 4 — ecosystem-gap crates, stretch goals (not yet built):
+
+  tpt-fem-eigen
+    Build. Sparse shift-invert Lanczos/Arnoldi eigensolver for modal/
+    vibration analysis. Depends on: tpt-fem-sparse.
+
+  tpt-fem-io-exodus
+    Build. Exodus II reader/writer. Depends on: tpt-fem-mesh.
+
+  tpt-fem-io-abaqus
+    Build. Abaqus .inp reader/writer. Depends on: tpt-fem-mesh.
+
+BUILD ORDER
+tpt-fem-quadrature -> tpt-fem-element -> (tpt-fem-mesh, tpt-fem-sparse, any
+order) -> tpt-fem (umbrella) -> tpt-fem-assembly -> (tpt-fem-thermal,
+tpt-fem-io-vtk, any order) -> tpt-fem-elasticity -> tpt-fem-solve ->
+(tpt-fem-eigen, tpt-fem-io-exodus, tpt-fem-io-abaqus, any order).
+
+REPO CONVENTIONS
+Cargo workspace under crates/, one crate per directory. [workspace.package]
+carries license = "MIT OR Apache-2.0", edition, rust-version shared via
+`.workspace = true`. Root LICENSE-MIT/LICENSE-APACHE, rustfmt.toml,
+deny.toml, rust-toolchain.toml, CI workflow seeded from
+tpt-rust-map/template/. Every crate registered in tpt-rust-map/registry.toml
+with status = "planned" before implementation starts, flipped to "git"
+once implemented, tested, and building clean.

@@ -1,0 +1,26 @@
+[package]
+name = "tpt-fem"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Umbrella crate re-exporting tpt-fem core crates behind Cargo features."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tpt-fem-quadrature = { workspace = true, optional = true }
+tpt-fem-element = { workspace = true, optional = true }
+tpt-fem-mesh = { workspace = true, optional = true }
+tpt-fem-sparse = { workspace = true, optional = true }
+
+[features]
+default = ["quadrature", "element", "mesh", "sparse"]
+quadrature = ["dep:tpt-fem-quadrature"]
+element = ["dep:tpt-fem-element"]
+mesh = ["dep:tpt-fem-mesh"]
+sparse = ["dep:tpt-fem-sparse"]
+
+[lints]
+workspace = true
