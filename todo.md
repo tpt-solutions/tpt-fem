@@ -19,9 +19,9 @@
 - [x] Add a Rust `.gitignore`
 - [x] Write root `README.md`
 - [x] Adapt `spec.txt` from `template/spec.txt`
-- [ ] `git init` (local only — no GitHub remote/push)
-- [ ] Initial commit
-- [ ] Sanity check: `cargo build` succeeds
+- [x] `git init` (local only — no GitHub remote/push)
+- [x] Initial commit
+- [x] Sanity check: `cargo build` succeeds
 
 ## Per-Crate Checklist Template
 
@@ -46,33 +46,33 @@ gating each constituent re-export, no direct implementation.
 
 *Gauss quadrature rules for reference elements. No internal deps.*
 
-- [ ] Scaffold `crates/tpt-fem-quadrature/`
-- [ ] Implement 1D Gauss-Legendre rules (orders 1-5), tensor-product
+- [x] Scaffold `crates/tpt-fem-quadrature/`
+- [x] Implement 1D Gauss-Legendre rules (orders 1-5), tensor-product
       quad/hex rules built from the 1D rule
-- [ ] Implement fixed low-order triangle rules (1-point degree-1, 3-point
+- [x] Implement fixed low-order triangle rules (1-point degree-1, 3-point
       degree-2, Hammer-Stroud)
-- [ ] Implement fixed low-order tetrahedron rules (1-point degree-1,
+- [x] Implement fixed low-order tetrahedron rules (1-point degree-1,
       4-point degree-2, Keast)
-- [ ] Unit tests: each rule integrates low-degree monomials exactly
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
-- [ ] registry.toml: `tpt-fem-quadrature` → `"git"`
+- [x] Unit tests: each rule integrates low-degree monomials exactly
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
+- [x] registry.toml: `tpt-fem-quadrature` → `"git"`
 
 ### 1b — tpt-fem-element
 
 *Reference elements + P1 Lagrange shape functions + isoparametric Jacobian
 mapping. Depends on: tpt-fem-quadrature.*
 
-- [ ] Scaffold `crates/tpt-fem-element/`
-- [ ] Implement `Line2`, `Tri3`, `Quad4`, `Tet4`, `Hex8` shape functions +
+- [x] Scaffold `crates/tpt-fem-element/`
+- [x] Implement `Line2`, `Tri3`, `Quad4`, `Tet4`, `Hex8` shape functions +
       local (reference-coordinate) derivatives
-- [ ] Implement isoparametric Jacobian: physical-coordinate derivatives,
+- [x] Implement isoparametric Jacobian: physical-coordinate derivatives,
       determinant, from node coordinates + local derivatives
-- [ ] Unit tests: partition of unity (shape functions sum to 1), Jacobian
+- [x] Unit tests: partition of unity (shape functions sum to 1), Jacobian
       of an undistorted reference element is identity/known constant
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
-- [ ] registry.toml: `tpt-fem-element` → `"git"`
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
+- [x] registry.toml: `tpt-fem-element` → `"git"`
 - [ ] **Follow-up, not this pass:** P2/quadratic shape functions (Tri6,
       Quad8/9, Tet10, Hex20/27)
 
@@ -81,32 +81,32 @@ mapping. Depends on: tpt-fem-quadrature.*
 *Mesh data structures, DOF numbering, Gmsh import. No internal deps (see
 spec.txt for the planned tpt-geom migration).*
 
-- [ ] Scaffold `crates/tpt-fem-mesh/`
-- [ ] Wire deps: `mshio`
-- [ ] Implement `Node`/`Element`/`Mesh` types + manual mesh-builder API
-- [ ] Implement DOF numbering (configurable dofs-per-node)
-- [ ] Implement Gmsh `.msh` v4.1 import via `mshio`
-- [ ] Unit tests + doctests
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
-- [ ] `cargo deny check` clean
-- [ ] registry.toml: `tpt-fem-mesh` → `"git"`
+- [x] Scaffold `crates/tpt-fem-mesh/`
+- [x] Wire deps: `mshio`
+- [x] Implement `Node`/`Element`/`Mesh` types + manual mesh-builder API
+- [x] Implement DOF numbering (configurable dofs-per-node)
+- [x] Implement Gmsh `.msh` v4.1 import via `mshio`
+- [x] Unit tests + doctests
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
+- [x] `cargo deny check` clean
+- [x] registry.toml: `tpt-fem-mesh` → `"git"`
 
 ### 1d — tpt-fem-sparse
 
 *COO/CSR assembly adapter + faer-backed sparse solve. No internal deps.*
 
-- [ ] Scaffold `crates/tpt-fem-sparse/`
-- [ ] Wire deps: `faer`
-- [ ] Implement COO triplet accumulator (duplicate-summing)
-- [ ] Implement CSR conversion
-- [ ] Implement `solve()` dispatching to faer's sparse LU (default backend)
-- [ ] Unit tests: solve a small known linear system, check against expected
+- [x] Scaffold `crates/tpt-fem-sparse/`
+- [x] Wire deps: `faer`
+- [x] Implement COO triplet accumulator (duplicate-summing)
+- [x] Implement CSR conversion
+- [x] Implement `solve()` dispatching to faer's sparse LU (default backend)
+- [x] Unit tests: solve a small known linear system, check against expected
       solution
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
-- [ ] `cargo deny check` clean
-- [ ] registry.toml: `tpt-fem-sparse` → `"git"`
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
+- [x] `cargo deny check` clean
+- [x] registry.toml: `tpt-fem-sparse` → `"git"`
 - [ ] **Follow-up, not this pass:** feature-gated `russell_sparse`
       (SuiteSparse/MUMPS) backend for large-scale problems — verify
       SuiteSparse component licenses individually before enabling
@@ -115,24 +115,24 @@ spec.txt for the planned tpt-geom migration).*
 
 *Re-exports quadrature + element + mesh + sparse behind Cargo features.*
 
-- [ ] Scaffold `crates/tpt-fem/`
-- [ ] Wire optional deps + feature flags for quadrature/element/mesh/sparse
-- [ ] Re-export each constituent's public API behind its feature
-- [ ] **End-to-end patch test** (`tests/patch_test.rs`): hand-built 2-3
+- [x] Scaffold `crates/tpt-fem/`
+- [x] Wire optional deps + feature flags for quadrature/element/mesh/sparse
+- [x] Re-export each constituent's public API behind its feature
+- [x] **End-to-end patch test** (`tests/patch_test.rs`): hand-built 2-3
       element mesh with a textbook-known stiffness matrix and analytical
       solution, driven through element shape functions + quadrature →
       triplet assembly → sparse solve, asserting the result matches the
       analytical solution within tolerance
-- [ ] Rustdoc documenting the feature matrix
-- [ ] `cargo fmt` / `clippy` / `deny` clean across feature combinations
-- [ ] registry.toml: `tpt-fem` → `"git"`
+- [x] Rustdoc documenting the feature matrix
+- [x] `cargo fmt` / `clippy` / `deny` clean across feature combinations
+- [x] registry.toml: `tpt-fem` → `"git"`
 
 ## Final Phase 1 Closeout
 
-- [ ] `cargo test --workspace --all-features` passes
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean
-- [ ] `cargo deny check` clean workspace-wide
-- [ ] Confirm every Phase 1 `tpt-fem-*` entry in `tpt-rust-map/registry.toml`
+- [x] `cargo test --workspace --all-features` passes
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean
+- [x] `cargo deny check` clean workspace-wide
+- [x] Confirm every Phase 1 `tpt-fem-*` entry in `tpt-rust-map/registry.toml`
       reads `status = "git"`
 
 ---
