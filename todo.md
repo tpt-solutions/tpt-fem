@@ -215,3 +215,123 @@ clean → registry `planned`→`git`). All three pass `cargo test`, `cargo fmt
 - [x] `cargo fmt --all --check` clean
 - [ ] `tpt-rust-map/registry.toml` entries → `"git"`: deferred (sibling repo
       not present in this workspace)
+
+---
+
+## Phase 5 — Hardening, Error Ergonomics &amp; Prelude
+
+*A security/completeness/adoption audit (2026-08-12) found that several
+Phase 1-4 crates check off scope in this file that isn't fully there. This
+phase and Phases 6-9 below track fixing that honestly. See the archived
+plan for full technical detail:
+`C:\Users\Phillip\.claude\plans\review-project-fix-any-lovely-sprout.md`.*
+
+- [x] Error unification: `Display`/`Error` impls for `SparseError`,
+      `MeshError`, `NewtonError`, `ExodusError`, `InpError`, new `VtkError`
+      (wraps `vtkio::Error` instead of leaking it). Cross-crate `From`
+      conversions (`MeshError` → `ExodusError`/`InpError`, `io::Error` →
+      `{ExodusError, InpError, VtkError}`, `vtkio::Error` → `VtkError`).
+- [x] `tpt-fem-mesh`: `Mesh::validate`, `MeshBuilder::try_add_element`/
+      `try_build`, new `MeshError` variants (`DanglingNodeTag`,
+      `NodeCountMismatch`, `NodeIndexOutOfRange`).
+- [x] `tpt-fem-mesh`: geometric selectors (`nodes_on_plane`, `nodes_in_box`)
+      and Gmsh `$Entities` physical-group tags (`Node::region`,
+      `Element::region`, `MeshBuilder::add_element_with_region`).
+- [x] `tpt-fem-sparse`: `solve_multi` (one factorization, multiple RHS;
+      `solve` now delegates to it) — prerequisite for Phase 6's arc-length
+      solver.
+- [ ] `tpt-fem-io-exodus`: harden the hand-rolled NetCDF-3 codec — unbounded
+      `Vec::with_capacity` from untrusted counts (process-abort risk),
+      `read_name` OOB slice on truncated files, `.unwrap()` + unchecked
+      dimension index, `connect0` integer underflow (panics in release
+      builds thanks to this workspace's `overflow-checks = true`), and
+      connectivity node indices never validated against `num_nodes` (a `0`
+      entry silently corrupts the mesh instead of erroring). Switch
+      `bytes_to_mesh`/`read_inp` to `try_add_element`/`try_build`. Add a
+      `dtype` cross-check. Malformed-input regression tests for each.
+- [ ] `tpt-fem-mesh`: fix the Gmsh importer's `.expect("node tag present in
+      mesh")` panic on a dangling `$Elements` node-tag reference (now
+      returns `MeshError::DanglingNodeTag` — done above, keeping this line
+      as a pointer to the regression test still owed).
+- [ ] Prelude module (`tpt_fem::prelude`) on the umbrella crate, feature-gated
+      per constituent. Blocked on Phase 6's `solve_frame2d`/`solve_modal`/
+      `arc_length_continuation` existing so the prelude can include them.
+- [ ] `cargo test --workspace --all-features` / `clippy` / `fmt` / `deny`
+      clean after this phase.
+
+## Phase 6 — Physics Completeness (beam, arc-length, generalized eigen)
+
+*Closes the gap between what Phases 3-4 check off above and what's actually
+implemented.*
+
+- [ ] `tpt-fem-assembly`: extract `reduce_system` out of `solve_with_dirichlet`
+      (shared prerequisite for generalized eigen + arc-length).
+- [ ] `tpt-fem-elasticity`: 2-D Euler-Bernoulli frame element
+      (`BeamSection2D`, `beam2d_element_matrix`, `beam2d_consistent_mass`,
+      `solve_frame2d`) — closed-form Hermite-cubic stiffness/mass, verified
+      against textbook cantilever/simply-supported deflections. 3-D beam
+      (torsion, biaxial bending, orientation triad) tracked as a follow-up,
+      not this pass — same treatment as P2 elements in Phase 1b.
+- [ ] `tpt-fem-elasticity`: `elasticity_mass_matrix`/`elasticity_lumped_mass`
+      (consistent/lumped mass, reusing the existing quadrature machinery)
+      and `solve_modal` (assembles K + M, Dirichlet-reduces both, calls into
+      `tpt-fem-eigen`'s generalized solver).
+- [ ] `tpt-fem-eigen`: `generalized_lanczos_eigs` — M-orthogonal shift-invert
+      Lanczos for the generalized symmetric eigenproblem `Kx = λMx`. Plain
+      Arnoldi (for genuinely non-symmetric operators, which nothing in this
+      workspace's physics crates produces) is a tracked follow-up, not this
+      pass.
+- [ ] `tpt-fem-solve`: real arc-length continuation
+      (`arc_length_continuation`, Crisfield spherical constraint via the
+      bordering algorithm, adaptive step sizing, failure/cut-back handling).
+      Verified against (1) an algebraic fold with a known limit point and
+      (2) a hand-written total-Lagrangian 2-bar snap-through truss residual
+      (written as a test-only nonlinear residual — a general
+      geometric-nonlinearity framework across all elements is explicitly
+      out of scope for this pass).
+- [ ] Update `tpt_fem::prelude` with `solve_frame2d`/`solve_modal`/
+      `arc_length_continuation`/`ArcLengthOptions`/`generalized_lanczos_eigs`.
+- [ ] `cargo test --workspace --all-features` / `clippy` / `fmt` / `deny`
+      clean after this phase.
+
+## Phase 7 — CLI, Verification &amp; Fuzz Suite, Docs
+
+- [ ] `tpt-fem-cli` (new workspace member, `[[bin]] name = "tpt-fem"`):
+      TOML config (`[problem]`/`[mesh]`/`[material]`/`[source]`/`[[bc]]`
+      with node/plane/box/region/boundary selectors/`[output]`), `solve`
+      (thermal Poisson in this pass, elasticity reserved in the schema as a
+      fast-follow), `mesh info`, `mesh convert`. Error UX built on Phase 5's
+      `Display` impls.
+- [ ] `tpt-fem-thermal`: MMS convergence test suite (`tests/
+      mms_convergence.rs`) — manufactured solution, L2/H1 convergence-rate
+      assertions on a refined mesh sequence (1-D, 2-D, and an `#[ignore]`
+      3-D variant).
+- [ ] New `fuzz/` (cargo-fuzz, excluded from the main workspace):
+      `exodus_decode`, `gmsh_import`, `abaqus_inp`, `exodus_roundtrip`
+      targets. Nightly compile-only `fuzz-build` CI job; actual fuzzing runs
+      live in a separate scheduled workflow.
+- [ ] `crates/tpt-fem/examples/thermal_solve.rs` using only the prelude;
+      dedupe `tests/patch_test.rs`'s private `solve_with_dirichlet` against
+      the real `tpt_fem_assembly` one (keep the low-level element-loop
+      coverage); new `tests/end_to_end.rs` exercising the real
+      mesh→solve→VTK path.
+- [ ] README.md rewrite covering all 13 crates (currently Phase-1-only).
+- [ ] Root `Justfile` wrapping the README's cargo commands.
+- [ ] CI: `Swatinem/rust-cache`, a `docs` job (`cargo doc --workspace
+      --no-deps --all-features` with `-D warnings`), a `wasm` job
+      (hard-fail for `quadrature`/`element`/`mesh`, soft-fail for `sparse`
+      pending confirmation of the `faer`→`rayon` wasm32 compatibility risk).
+- [ ] crates.io metadata (`keywords`/`categories`/`readme`) across all 13
+      crate `Cargo.toml`s.
+
+## Phase 8 — Python Bindings
+
+- [ ] New `crates/tpt-fem-py` (pyo3, `exclude`d from the main workspace):
+      `Mesh` class (`load`/`box_mesh`/`coords`/`nodes_on_plane`/
+      `nodes_in_box`/`write_vtk`) and `solve_poisson` (constant or
+      Python-callback source term, GIL-safe exception propagation).
+      `maturin`-based local dev workflow (`maturin develop` + `pytest`); no
+      wheel-building or PyPI publishing this pass, matching this repo's
+      existing crates.io-publishing-out-of-scope policy.
+      Explicitly last: highest external-tooling risk, depends on the CLI's
+      config/selector decisions already being settled.

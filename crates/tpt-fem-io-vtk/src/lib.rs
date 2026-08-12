@@ -52,6 +52,45 @@ impl PointData {
     }
 }
 
+/// Errors returned while writing a VTK file.
+#[derive(Debug)]
+pub enum VtkError {
+    /// The underlying `vtkio` export failed.
+    Vtk(vtkio::Error),
+    /// An I/O error occurred while writing the file.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for VtkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VtkError::Vtk(e) => write!(f, "failed to write VTK file: {e}"),
+            VtkError::Io(e) => write!(f, "I/O error writing VTK file: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for VtkError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            VtkError::Vtk(e) => Some(e),
+            VtkError::Io(e) => Some(e),
+        }
+    }
+}
+
+impl From<vtkio::Error> for VtkError {
+    fn from(e: vtkio::Error) -> Self {
+        VtkError::Vtk(e)
+    }
+}
+
+impl From<std::io::Error> for VtkError {
+    fn from(e: std::io::Error) -> Self {
+        VtkError::Io(e)
+    }
+}
+
 fn vtk_cell_type(cell: CellType) -> vtkio::model::CellType {
     match cell {
         CellType::Line => vtkio::model::CellType::Line,
@@ -119,13 +158,13 @@ pub fn mesh_to_vtk(mesh: &Mesh, point_data: &[PointData]) -> Vtk {
 }
 
 /// Write the mesh (no scalar fields) as a binary legacy `.vtk` file.
-pub fn write_vtk(mesh: &Mesh, path: impl AsRef<Path>) -> Result<(), vtkio::Error> {
-    mesh_to_vtk(mesh, &[]).export(path)
+pub fn write_vtk(mesh: &Mesh, path: impl AsRef<Path>) -> Result<(), VtkError> {
+    Ok(mesh_to_vtk(mesh, &[]).export(path)?)
 }
 
 /// Write the mesh (no scalar fields) as an ASCII legacy `.vtk` file.
-pub fn write_vtk_ascii(mesh: &Mesh, path: impl AsRef<Path>) -> Result<(), vtkio::Error> {
-    mesh_to_vtk(mesh, &[]).export_ascii(path)
+pub fn write_vtk_ascii(mesh: &Mesh, path: impl AsRef<Path>) -> Result<(), VtkError> {
+    Ok(mesh_to_vtk(mesh, &[]).export_ascii(path)?)
 }
 
 /// Write the mesh together with per-node scalar fields as a `.vtk` file.
@@ -133,8 +172,8 @@ pub fn write_vtk_with_data(
     mesh: &Mesh,
     point_data: &[PointData],
     path: impl AsRef<Path>,
-) -> Result<(), vtkio::Error> {
-    mesh_to_vtk(mesh, point_data).export(path)
+) -> Result<(), VtkError> {
+    Ok(mesh_to_vtk(mesh, point_data).export(path)?)
 }
 
 #[cfg(test)]

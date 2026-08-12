@@ -105,3 +105,38 @@ pub use tpt_fem_solve::*;
 pub use tpt_fem_sparse::*;
 #[cfg(feature = "thermal")]
 pub use tpt_fem_thermal::*;
+
+/// A curated, feature-gated prelude.
+///
+/// `use tpt_fem::prelude::*;` pulls in the public API of every constituent
+/// crate that is enabled by its Cargo feature, so a typical application can be
+/// written against a single import. Like the crate-root re-exports, each
+/// constituent is gated: only crates whose feature is on appear in the prelude.
+pub mod prelude {
+    #[cfg(feature = "assembly")]
+    pub use tpt_fem_assembly::*;
+    #[cfg(feature = "eigen")]
+    pub use tpt_fem_eigen::*;
+    #[cfg(feature = "elasticity")]
+    pub use tpt_fem_elasticity::*;
+    #[cfg(feature = "element")]
+    pub use tpt_fem_element::*;
+    #[cfg(feature = "io-abaqus")]
+    pub use tpt_fem_io_abaqus::*;
+    #[cfg(feature = "io-exodus")]
+    pub use tpt_fem_io_exodus::*;
+    #[cfg(feature = "io-vtk")]
+    pub use tpt_fem_io_vtk::*;
+    #[cfg(feature = "mesh")]
+    pub use tpt_fem_mesh::*;
+    #[cfg(feature = "mesh-gen")]
+    pub use tpt_fem_mesh_gen::*;
+    #[cfg(feature = "quadrature")]
+    pub use tpt_fem_quadrature::*;
+    #[cfg(feature = "solve")]
+    pub use tpt_fem_solve::*;
+    #[cfg(feature = "sparse")]
+    pub use tpt_fem_sparse::*;
+    #[cfg(feature = "thermal")]
+    pub use tpt_fem_thermal::*;
+}

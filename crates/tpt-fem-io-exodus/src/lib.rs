@@ -19,6 +19,44 @@ pub enum ExodusError {
     Parse(String),
     /// An unsupported construct (e.g. record variables, non-3D coordinates).
     Unsupported(String),
+    /// The mesh built from the file failed validation (e.g. a node index out
+    /// of range).
+    Mesh(tpt_fem_mesh::MeshError),
+    /// An I/O error occurred while reading or writing the file.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for ExodusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExodusError::Parse(m) => write!(f, "malformed Exodus/NetCDF file: {m}"),
+            ExodusError::Unsupported(m) => write!(f, "unsupported Exodus construct: {m}"),
+            ExodusError::Mesh(e) => write!(f, "invalid mesh in Exodus file: {e}"),
+            ExodusError::Io(e) => write!(f, "I/O error reading/writing Exodus file: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ExodusError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ExodusError::Mesh(e) => Some(e),
+            ExodusError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<tpt_fem_mesh::MeshError> for ExodusError {
+    fn from(e: tpt_fem_mesh::MeshError) -> Self {
+        ExodusError::Mesh(e)
+    }
+}
+
+impl From<std::io::Error> for ExodusError {
+    fn from(e: std::io::Error) -> Self {
+        ExodusError::Io(e)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -61,20 +99,38 @@ fn enc_name(name: &str) -> Vec<u8> {
     out
 }
 
-fn dim_size(dims: &[NcDim], id: u32) -> u32 {
-    dims[id as usize].size
+fn dim_size(dims: &[NcDim], id: u32) -> Result<u32, ExodusError> {
+    let d = usize::try_from(id)
+        .map_err(|_| ExodusError::Parse(format!("dimension id {id} overflows")))?;
+    dims.get(d)
+        .map(|dim| dim.size)
+        .ok_or_else(|| ExodusError::Parse(format!("dimension id {id} out of range")))
 }
 
-fn vsize_of(dims: &[NcDim], v: &NcVar) -> u32 {
+fn vsize_of(dims: &[NcDim], v: &NcVar) -> Result<u32, ExodusError> {
     let mut s: u32 = match v.dtype {
         NC_CHAR => 1,
         NC_INT | NC_FLOAT => 4,
         _ => 4,
     };
     for &d in &v.dim_ids {
-        s *= dim_size(dims, d);
+        s = s
+            .checked_mul(dim_size(dims, d)?)
+            .ok_or_else(|| ExodusError::Parse("variable size overflows u32".into()))?;
     }
-    s
+    Ok(s)
+}
+
+/// Reject a count read from an untrusted file before using it to size an
+/// allocation: a corrupted `numrecs`/dimension/variable count could otherwise
+/// ask for an absurd `Vec::with_capacity`, which aborts the process.
+fn sane_count(count: usize, bytes: &[u8]) -> Result<usize, ExodusError> {
+    // Every entry consumes at least 4 bytes (a name length byte plus padding,
+    // or a u32), so the count can never legitimately exceed this bound.
+    if count > bytes.len() / 4 + 8 {
+        return Err(ExodusError::Parse(format!("implausible count {count}")));
+    }
+    Ok(count)
 }
 
 /// Encode a file from dimensions and variables into NetCDF-3 classic bytes.
@@ -87,7 +143,7 @@ fn encode_nc3(dims: &[NcDim], vars: &[NcVar]) -> Vec<u8> {
     let mut cursor = data_off;
     for v in vars {
         begins.push(cursor as u32);
-        let size = vsize_of(dims, v) as usize;
+        let size = vsize_of(dims, v).expect("encoding trusted dimensions") as usize;
         cursor += size;
         cursor = (cursor + 3) & !3;
     }
@@ -128,7 +184,9 @@ fn build_header(dims: &[NcDim], vars: &[NcVar], begins: &[u32]) -> Vec<u8> {
         }
         h.extend_from_slice(&to_u32(0)); // number of attributes
         h.extend_from_slice(&to_u32(v.dtype));
-        h.extend_from_slice(&to_u32(vsize_of(dims, v)));
+        h.extend_from_slice(&to_u32(
+            vsize_of(dims, v).expect("encoding trusted dimensions"),
+        ));
         h.extend_from_slice(&to_u32(begin));
     }
     h.extend_from_slice(&to_u32(0)); // NC_END
@@ -149,6 +207,7 @@ fn decode_nc3(bytes: &[u8]) -> Result<(Vec<NcDim>, Vec<(NcVar, usize)>), ExodusE
         return Err(ExodusError::Parse("expected dimension tag".into()));
     }
     let ndims = read_u32(bytes, &mut pos)? as usize;
+    let ndims = sane_count(ndims, bytes)?;
     let mut dims = Vec::with_capacity(ndims);
     for _ in 0..ndims {
         let name = read_name(bytes, &mut pos)?;
@@ -160,17 +219,29 @@ fn decode_nc3(bytes: &[u8]) -> Result<(Vec<NcDim>, Vec<(NcVar, usize)>), ExodusE
         return Err(ExodusError::Parse("expected variable tag".into()));
     }
     let nvars = read_u32(bytes, &mut pos)? as usize;
+    let nvars = sane_count(nvars, bytes)?;
     let mut vars = Vec::with_capacity(nvars);
     for _ in 0..nvars {
         let name = read_name(bytes, &mut pos)?;
         let nd = read_u32(bytes, &mut pos)? as usize;
+        let nd = sane_count(nd, bytes)?;
         let mut dim_ids = Vec::with_capacity(nd);
         for _ in 0..nd {
             dim_ids.push(read_u32(bytes, &mut pos)?);
         }
         let _natts = read_u32(bytes, &mut pos)?;
         let dtype = read_u32(bytes, &mut pos)?;
-        let vsize = read_u32(bytes, &mut pos)? as usize;
+        let _vsize = read_u32(bytes, &mut pos)? as usize; // declared vsize; recomputed below
+        let vsize = usize::try_from(vsize_of(
+            &dims,
+            &NcVar {
+                name: name.clone(),
+                dtype,
+                dim_ids: dim_ids.clone(),
+                data: Vec::new(),
+            },
+        )?)
+        .map_err(|_| ExodusError::Parse("variable size too large".into()))?;
         let begin = read_u32(bytes, &mut pos)? as usize;
         let data = bytes
             .get(begin..begin + vsize)
@@ -200,12 +271,15 @@ fn read_u32(bytes: &[u8], pos: &mut usize) -> Result<u32, ExodusError> {
 fn read_name(bytes: &[u8], pos: &mut usize) -> Result<String, ExodusError> {
     let len = *bytes
         .get(*pos)
-        .ok_or_else(|| ExodusError::Parse("name length".into()))? as usize;
+        .ok_or_else(|| ExodusError::Parse("name length truncated".into()))? as usize;
     *pos += 1;
     let end = *pos + len;
+    if end > bytes.len() {
+        return Err(ExodusError::Parse("name truncated".into()));
+    }
     let name = String::from_utf8_lossy(&bytes[*pos..end]).into_owned();
     *pos = end;
-    while *pos % 4 != 0 {
+    while *pos < bytes.len() && *pos % 4 != 0 {
         *pos += 1;
     }
     Ok(name)
@@ -485,12 +559,34 @@ pub fn bytes_to_mesh(bytes: &[u8]) -> Result<Mesh, ExodusError> {
     let coords = varmap
         .get("coords")
         .ok_or_else(|| ExodusError::Parse("missing coords".into()))?;
+    if coords.0 != NC_FLOAT {
+        return Err(ExodusError::Parse(
+            "coords variable must be NC_FLOAT".into(),
+        ));
+    }
     let coords = decode_floats(&coords.1);
+    if coords.len() % 3 != 0 {
+        return Err(ExodusError::Parse(
+            "coords length is not a multiple of 3".into(),
+        ));
+    }
     let num_nodes = coords.len() / 3;
+    if num_nodes == 0 {
+        return Err(ExodusError::Parse("coords contains no nodes".into()));
+    }
 
     let eb_names = varmap
         .get("eb_names")
-        .map(|(_, d)| decode_chars(d, d.len() / LEN_NAME as usize))
+        .map(|(dt, d)| {
+            if *dt != NC_CHAR {
+                Err(ExodusError::Parse(
+                    "eb_names variable must be NC_CHAR".into(),
+                ))
+            } else {
+                Ok(decode_chars(d, d.len() / LEN_NAME as usize))
+            }
+        })
+        .transpose()?
         .unwrap_or_default();
 
     let mut builder = MeshBuilder::new();
@@ -501,23 +597,40 @@ pub fn bytes_to_mesh(bytes: &[u8]) -> Result<Mesh, ExodusError> {
         builder.add_node(vec![x, y, z]);
     }
 
-    // For each connectN variable, build a block.
-    let mut connect_vars: Vec<(usize, &NcVar)> = vars
+    // For each connectN variable, build a block. Retain the on-disk `begin`
+    // offset so tests can locate (and corrupt) the connectivity payload.
+    let mut connect_vars: Vec<(usize, &NcVar, usize)> = vars
         .iter()
         .filter(|(v, _)| v.name.starts_with("connect"))
-        .map(|(v, _)| {
+        .map(|(v, begin)| {
             let idx: String = v.name.trim_start_matches("connect").to_string();
-            (idx.parse::<usize>().unwrap_or(0), v)
+            (idx.parse::<usize>().unwrap_or(0), v, *begin)
         })
         .collect();
-    connect_vars.sort_by_key(|(i, _)| *i);
+    connect_vars.sort_by_key(|(i, _, _)| *i);
 
-    for (_, v) in &connect_vars {
+    for (_, v, _begin) in &connect_vars {
+        if v.dtype != NC_INT {
+            return Err(ExodusError::Parse(format!(
+                "connect variable {} must be NC_INT",
+                v.name
+            )));
+        }
         // dim_ids = [num_elem_in_block, nodes_per_elem] (dimension indices)
-        let npe = dims[*v.dim_ids.last().unwrap() as usize].size as usize;
+        let last_dim = *v
+            .dim_ids
+            .last()
+            .ok_or_else(|| ExodusError::Parse(format!("connect {} has no dims", v.name)))?;
+        let npe = dim_size(&dims, last_dim)? as usize;
         let cell = if !eb_names.is_empty() {
             // Determine block index from variable number.
             let idx: usize = v.name.trim_start_matches("connect").parse().unwrap_or(1);
+            if idx == 0 {
+                return Err(ExodusError::Parse(format!(
+                    "connect variable {} has no numeric suffix",
+                    v.name
+                )));
+            }
             let name = eb_names.get(idx - 1).map(|s| s.as_str()).unwrap_or("");
             exodus_name_to_cell(name)
                 .ok_or_else(|| ExodusError::Parse(format!("unknown block {name}")))?
@@ -534,16 +647,47 @@ pub fn bytes_to_mesh(bytes: &[u8]) -> Result<Mesh, ExodusError> {
             )));
         }
         let raw = decode_ints(&v.data);
+        if raw.len() % npe != 0 {
+            return Err(ExodusError::Parse(format!(
+                "connect {} has {} values, not a multiple of {npe}",
+                v.name,
+                raw.len()
+            )));
+        }
         let n_in_block = raw.len() / npe;
         for e in 0..n_in_block {
-            let nodes: Vec<usize> = (0..npe)
-                .map(|k| (raw[e * npe + k] - 1) as usize) // 1-based -> 0-based
-                .collect();
-            builder.add_element(cell, nodes);
+            // 1-based Exodus node ids -> 0-based, validating each against the
+            // mesh's node count. A `0` entry (or any id out of range) corrupts
+            // the connectivity and would otherwise be accepted silently.
+            let mut nodes: Vec<usize> = Vec::with_capacity(npe);
+            for k in 0..npe {
+                let c = raw[e * npe + k];
+                if c < 1 {
+                    return Err(ExodusError::Mesh(
+                        tpt_fem_mesh::MeshError::NodeIndexOutOfRange {
+                            element: e,
+                            node: c as usize,
+                            node_count: num_nodes,
+                        },
+                    ));
+                }
+                let z = (c - 1) as usize;
+                if z >= num_nodes {
+                    return Err(ExodusError::Mesh(
+                        tpt_fem_mesh::MeshError::NodeIndexOutOfRange {
+                            element: e,
+                            node: z,
+                            node_count: num_nodes,
+                        },
+                    ));
+                }
+                nodes.push(z);
+            }
+            builder.try_add_element(cell, nodes)?;
         }
     }
 
-    Ok(builder.build())
+    Ok(builder.try_build()?)
 }
 
 /// Infer a cell type from nodes-per-element when block names are absent.
@@ -610,5 +754,99 @@ mod tests {
             .count();
         assert_eq!(tri, 2);
         assert_eq!(quad, 1);
+    }
+
+    #[test]
+    fn rejects_non_cdf1_magic() {
+        let err = bytes_to_mesh(b"NOPE").unwrap_err();
+        assert!(matches!(err, ExodusError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_truncated_header() {
+        let err = bytes_to_mesh(b"CDF\x01").unwrap_err();
+        assert!(matches!(err, ExodusError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_implausible_dimension_count() {
+        let mut b: Vec<u8> = vec![b'C', b'D', b'F', 1];
+        b.extend_from_slice(&0u32.to_be_bytes());
+        b.extend_from_slice(&NC_DIMENSION.to_be_bytes());
+        b.extend_from_slice(&u32::MAX.to_be_bytes());
+        let err = bytes_to_mesh(&b).unwrap_err();
+        assert!(matches!(err, ExodusError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_truncated_name() {
+        let mut b: Vec<u8> = vec![b'C', b'D', b'F', 1];
+        b.extend_from_slice(&0u32.to_be_bytes());
+        b.extend_from_slice(&NC_DIMENSION.to_be_bytes());
+        b.extend_from_slice(&1u32.to_be_bytes());
+        b.push(200u8);
+        let err = bytes_to_mesh(&b).unwrap_err();
+        assert!(matches!(err, ExodusError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_connect_zero_node_id() {
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0, 0.0]);
+        let n1 = b.add_node(vec![1.0, 0.0]);
+        let n2 = b.add_node(vec![0.0, 1.0]);
+        b.add_element(CellType::Tri, vec![n0, n1, n2]);
+        let bytes = mesh_to_exodus_bytes(&b.build());
+        // Locate the connect1 payload on disk and overwrite its first node id
+        // (1-based) with 0, which underflows to usize::MAX when subtracted.
+        let (_, vars) = decode_nc3(&bytes).unwrap();
+        let begin = vars
+            .iter()
+            .find(|(v, _)| v.name == "connect1")
+            .map(|(_, b)| *b)
+            .expect("connect1 present");
+        let mut corrupted = bytes.clone();
+        corrupted[begin..begin + 4].copy_from_slice(&0u32.to_be_bytes());
+        let err = bytes_to_mesh(&corrupted).unwrap_err();
+        assert!(matches!(err, ExodusError::Mesh(_)));
+    }
+
+    #[test]
+    fn rejects_connect_out_of_range_node_id() {
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0, 0.0]);
+        let n1 = b.add_node(vec![1.0, 0.0]);
+        let n2 = b.add_node(vec![0.0, 1.0]);
+        b.add_element(CellType::Tri, vec![n0, n1, n2]);
+        let bytes = mesh_to_exodus_bytes(&b.build());
+        // Overwrite the third (last) node id of the only element with 9, which
+        // maps to 0-based node 8 and is out of range for a 3-node mesh.
+        let (_, vars) = decode_nc3(&bytes).unwrap();
+        let begin = vars
+            .iter()
+            .find(|(v, _)| v.name == "connect1")
+            .map(|(_, b)| *b)
+            .expect("connect1 present");
+        let mut corrupted = bytes.clone();
+        corrupted[begin + 8..begin + 12].copy_from_slice(&9u32.to_be_bytes());
+        let err = bytes_to_mesh(&corrupted).unwrap_err();
+        assert!(matches!(err, ExodusError::Mesh(_)));
+    }
+
+    #[test]
+    fn rejects_coords_wrong_dtype() {
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0, 0.0]);
+        let n1 = b.add_node(vec![1.0, 0.0]);
+        let n2 = b.add_node(vec![0.0, 1.0]);
+        b.add_element(CellType::Tri, vec![n0, n1, n2]);
+        let mut bytes = mesh_to_exodus_bytes(&b.build());
+        let name = [6u8, b'c', b'o', b'o', b'r', b'd', b's', 0];
+        if let Some(p) = bytes.windows(name.len()).position(|w| w == name) {
+            let dtype_pos = p + 8 + 4 + 8 + 4;
+            bytes[dtype_pos] = NC_INT as u8;
+            let err = bytes_to_mesh(&bytes).unwrap_err();
+            assert!(matches!(err, ExodusError::Parse(_)));
+        }
     }
 }

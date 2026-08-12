@@ -17,6 +17,44 @@ pub enum InpError {
     Parse(String),
     /// An unknown element type was encountered.
     UnknownElementType(String),
+    /// The mesh built from the deck failed validation (e.g. a node index out
+    /// of range).
+    Mesh(tpt_fem_mesh::MeshError),
+    /// An I/O error occurred while reading or writing the file.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for InpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InpError::Parse(m) => write!(f, "malformed Abaqus .inp record: {m}"),
+            InpError::UnknownElementType(t) => write!(f, "unknown Abaqus element type: {t}"),
+            InpError::Mesh(e) => write!(f, "invalid mesh in Abaqus .inp file: {e}"),
+            InpError::Io(e) => write!(f, "I/O error reading/writing Abaqus .inp file: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for InpError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            InpError::Mesh(e) => Some(e),
+            InpError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<tpt_fem_mesh::MeshError> for InpError {
+    fn from(e: tpt_fem_mesh::MeshError) -> Self {
+        InpError::Mesh(e)
+    }
+}
+
+impl From<std::io::Error> for InpError {
+    fn from(e: std::io::Error) -> Self {
+        InpError::Io(e)
+    }
 }
 
 /// Map an Abaqus element type name to a `tpt-fem` cell type.
@@ -115,13 +153,13 @@ pub fn read_inp(text: &str) -> Result<Mesh, InpError> {
                         line
                     )));
                 }
-                builder.add_element(cell, nodes);
+                builder.try_add_element(cell, nodes)?;
             }
             None => {}
         }
     }
 
-    Ok(builder.build())
+    Ok(builder.try_build()?)
 }
 
 #[derive(Clone, Copy)]
@@ -145,7 +183,7 @@ fn parse_element_type(header: &str) -> Option<CellType> {
 }
 
 /// Write a `Mesh` to an Abaqus `.inp` file (nodes + a single element section).
-pub fn write_inp(mesh: &Mesh, path: impl AsRef<Path>) -> std::io::Result<()> {
+pub fn write_inp(mesh: &Mesh, path: impl AsRef<Path>) -> Result<(), InpError> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
     writeln!(f, "*NODE")?;

@@ -290,21 +290,35 @@ pub fn assemble(
     coo
 }
 
-/// Solve `A u = f` with essential (Dirichlet) conditions.
+/// The result of condensing the fixed (Dirichlet) DOFs out of a system.
 ///
-/// Fixed DOFs are condensed out of the system, the reduced system is solved by
-/// [`tpt-fem-sparse`], and the prescribed values are scattered back into the
-/// solution vector (which has one entry per global DOF).
-pub fn solve_with_dirichlet(
-    coo: &Coo,
-    rhs: &[f64],
-    bcs: &[(usize, f64)],
-) -> Result<Vec<f64>, SparseError> {
+/// `kred` and `fred` live in *reduced* DOF numbering `[0, free.len())`, where
+/// reduced DOF `i` corresponds to the global DOF `free[i]`. This is the shared
+/// low-level primitive behind [`solve_with_dirichlet`], the generalized
+/// eigenproblem, and arc-length continuation: each of those just needs the
+/// reduced matrix/vector and the `free` map back to global DOFs.
+pub struct ReducedSystem {
+    /// Reduced stiffness (or tangent) matrix, in reduced DOF numbering.
+    pub kred: Coo,
+    /// Reduced right-hand side, in reduced DOF numbering.
+    pub fred: Vec<f64>,
+    /// Global DOF index corresponding to each reduced DOF `i`.
+    pub free: Vec<usize>,
+}
+
+/// Condense the fixed (Dirichlet) DOFs out of `A u = f`.
+///
+/// The prescribed values are moved to the right-hand side (the standard
+/// "lifting" of the essential boundary condition), leaving a square reduced
+/// system in the free DOFs. The returned [`ReducedSystem`] carries the `free`
+/// map so the caller can scatter a reduced solution back to global DOFs.
+pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSystem {
     let n = rhs.len();
     let csr = coo.to_csr();
     let fixed: HashSet<usize> = bcs.iter().map(|(i, _)| *i).collect();
     let free: Vec<usize> = (0..n).filter(|i| !fixed.contains(i)).collect();
-    let free_idx: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
+    let free_idx: HashMap<usize, usize> =
+        free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
 
     let mut kred = Coo::new();
     let mut fred = vec![0.0; free.len()];
@@ -323,9 +337,25 @@ pub fn solve_with_dirichlet(
         fred[free_idx[&fdof]] = r;
     }
 
-    let x = solve(&kred, &fred)?;
+    ReducedSystem { kred, fred, free }
+}
+
+/// Solve `A u = f` with essential (Dirichlet) conditions.
+///
+/// Fixed DOFs are condensed out of the system (see [`reduce_system`]), the
+/// reduced system is solved by [`tpt-fem-sparse`], and the prescribed values
+/// are scattered back into the solution vector (which has one entry per global
+/// DOF).
+pub fn solve_with_dirichlet(
+    coo: &Coo,
+    rhs: &[f64],
+    bcs: &[(usize, f64)],
+) -> Result<Vec<f64>, SparseError> {
+    let n = rhs.len();
+    let reduced = reduce_system(coo, rhs, bcs);
+    let x = solve(&reduced.kred, &reduced.fred)?;
     let mut u = vec![0.0; n];
-    for (i, &dof) in free.iter().enumerate() {
+    for (i, &dof) in reduced.free.iter().enumerate() {
         u[dof] = x[i];
     }
     for (i, val) in bcs {

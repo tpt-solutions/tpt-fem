@@ -73,6 +73,18 @@ pub enum SparseError {
     Numeric(String),
 }
 
+impl std::fmt::Display for SparseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SparseError::Creation(m) => write!(f, "failed to build sparse matrix: {m}"),
+            SparseError::Symbolic(m) => write!(f, "sparse symbolic factorization failed: {m}"),
+            SparseError::Numeric(m) => write!(f, "sparse numeric factorization/solve failed: {m}"),
+        }
+    }
+}
+
+impl std::error::Error for SparseError {}
+
 impl Coo {
     /// Create an empty accumulator.
     pub fn new() -> Self {
@@ -177,6 +189,19 @@ impl Csr {
 /// the matrix is factored with [`faer`]'s sparse LU decomposition, and the
 /// system is solved.
 pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
+    let mut sols = solve_multi(coo, std::slice::from_ref(&rhs.to_vec()))?;
+    Ok(sols.pop().expect("solve_multi returns one solution per rhs"))
+}
+
+/// Solve `A x_k = rhs[k]` for every right-hand side in `rhs` against the
+/// *same* matrix `A`, factoring it only once.
+///
+/// Equivalent to calling [`solve`] once per right-hand side, but far
+/// cheaper when there is more than one: callers with multiple RHS vectors
+/// against an unchanged `A` (e.g. an arc-length continuation corrector,
+/// which needs both a tangent and a residual-correction solve per
+/// iteration) should prefer this over repeated `solve` calls.
+pub fn solve_multi(coo: &Coo, rhs: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, SparseError> {
     let csr = coo.to_csr();
     let n = csr.nrows;
     if csr.ncols != n {
@@ -185,14 +210,15 @@ pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
             csr.ncols
         )));
     }
-    if rhs.len() != n {
-        return Err(SparseError::Numeric(format!(
-            "rhs length {} does not match matrix dimension {n}",
-            rhs.len()
-        )));
+    for r in rhs {
+        if r.len() != n {
+            return Err(SparseError::Numeric(format!(
+                "rhs length {} does not match matrix dimension {n}",
+                r.len()
+            )));
+        }
     }
 
-    // Flatten the CSR back into (row, col, value) triplets for faer.
     let mut triplets: Vec<(usize, usize, f64)> = Vec::with_capacity(csr.nnz());
     for r in 0..n {
         for idx in csr.row_ptrs[r]..csr.row_ptrs[r + 1] {
@@ -207,9 +233,12 @@ pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
     let lu = Lu::try_new_with_symbolic(symbolic, mat.as_ref())
         .map_err(|e| SparseError::Numeric(format!("{e:?}")))?;
 
-    let mut b = faer::Mat::<f64>::from_fn(n, 1, |i, _| rhs[i]);
+    let ncols = rhs.len();
+    let mut b = faer::Mat::<f64>::from_fn(n, ncols, |i, j| rhs[j][i]);
     lu.solve_in_place(b.as_mut());
-    Ok((0..n).map(|i| b.read(i, 0)).collect())
+    Ok((0..ncols)
+        .map(|j| (0..n).map(|i| b.read(i, j)).collect())
+        .collect())
 }
 
 #[cfg(test)]
@@ -260,6 +289,25 @@ mod tests {
         // Hand-checked: x0 = 1, x1 = 1, x2 = 1.
         for v in x {
             assert!((v - 1.0).abs() < 1e-9, "got {v}");
+        }
+    }
+
+    #[test]
+    fn solve_multi_matches_repeated_solve() {
+        let mut c = Coo::new();
+        c.push(0, 0, 2.0);
+        c.push(0, 1, 1.0);
+        c.push(1, 0, 1.0);
+        c.push(1, 1, 3.0);
+        let x1 = solve(&c, &[3.0, 5.0]).unwrap();
+        let x2 = solve(&c, &[1.0, 1.0]).unwrap();
+        let both = solve_multi(&c, &[vec![3.0, 5.0], vec![1.0, 1.0]]).unwrap();
+        assert_eq!(both.len(), 2);
+        for (a, b) in x1.iter().zip(&both[0]) {
+            assert!((a - b).abs() < 1e-10);
+        }
+        for (a, b) in x2.iter().zip(&both[1]) {
+            assert!((a - b).abs() < 1e-10);
         }
     }
 
