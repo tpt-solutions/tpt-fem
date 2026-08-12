@@ -1,0 +1,23 @@
+[package]
+name = "tpt-fem-thermal"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Heat-conduction / Poisson finite-element formulations for tpt-fem."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tpt-fem-assembly = { workspace = true }
+tpt-fem-sparse = { workspace = true }
+tpt-fem-element = { workspace = true }
+tpt-fem-mesh = { workspace = true }
+tpt-fem-quadrature = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

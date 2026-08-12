@@ -5,6 +5,15 @@ members = [
     "crates/tpt-fem-element",
     "crates/tpt-fem-mesh",
     "crates/tpt-fem-sparse",
+    "crates/tpt-fem-assembly",
+    "crates/tpt-fem-thermal",
+    "crates/tpt-fem-io-vtk",
+    "crates/tpt-fem-elasticity",
+    "crates/tpt-fem-solve",
+    "crates/tpt-fem-eigen",
+    "crates/tpt-fem-io-abaqus",
+    "crates/tpt-fem-io-exodus",
+    "crates/tpt-fem-mesh-gen",
     "crates/tpt-fem",
 ]
 exclude = []
@@ -23,6 +32,15 @@ tpt-fem-quadrature = { version = "0.1.0", path = "crates/tpt-fem-quadrature" }
 tpt-fem-element = { version = "0.1.0", path = "crates/tpt-fem-element" }
 tpt-fem-mesh = { version = "0.1.0", path = "crates/tpt-fem-mesh" }
 tpt-fem-sparse = { version = "0.1.0", path = "crates/tpt-fem-sparse" }
+tpt-fem-assembly = { version = "0.1.0", path = "crates/tpt-fem-assembly" }
+tpt-fem-thermal = { version = "0.1.0", path = "crates/tpt-fem-thermal" }
+tpt-fem-io-vtk = { version = "0.1.0", path = "crates/tpt-fem-io-vtk" }
+tpt-fem-elasticity = { version = "0.1.0", path = "crates/tpt-fem-elasticity" }
+tpt-fem-solve = { version = "0.1.0", path = "crates/tpt-fem-solve" }
+tpt-fem-eigen = { version = "0.1.0", path = "crates/tpt-fem-eigen" }
+tpt-fem-io-abaqus = { version = "0.1.0", path = "crates/tpt-fem-io-abaqus" }
+tpt-fem-io-exodus = { version = "0.1.0", path = "crates/tpt-fem-io-exodus" }
+tpt-fem-mesh-gen = { version = "0.1.0", path = "crates/tpt-fem-mesh-gen" }
 tpt-fem = { version = "0.1.0", path = "crates/tpt-fem" }
 
 [workspace.lints.rust]

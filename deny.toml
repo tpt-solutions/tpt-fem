@@ -6,7 +6,22 @@ version = 2
 yanked = "warn"
 # RUSTSEC-2024-0436: `paste` is unmaintained. No safe upgrade exists; it is a
 # widely-used, stable macro crate pulled in transitively by `faer`'s BLAS kernels.
-ignore = ["RUSTSEC-2024-0436"]
+# The following three advisories are reachable ONLY through `vtkio` (pulled in by
+# `tpt-fem-io-vtk`), which pins `quick-xml = "0.22"` and `lz4_flex = "0.7"`. No
+# patched release exists within those version ranges, and vtkio 0.6.3 is the
+# current upstream. In tpt-fem, vtkio is used strictly to write VTK files we
+# generate ourselves and to read those same trusted files back; it never parses
+# untrusted network XML or decompresses untrusted LZ4 streams, so the
+# untrusted-input attack surfaces these advisories describe do not apply.
+# RUSTSEC-2026-0041: lz4_flex 0.7.5 leaks uninitialized memory on invalid LZ4 block input.
+# RUSTSEC-2026-0194: quick-xml 0.22.0 unbounded duplicate-attribute allocation.
+# RUSTSEC-2026-0195: quick-xml 0.22.0 unbounded namespace-declaration allocation (OOM).
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0041",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 
 [licenses]
 # All workspace crates are MIT OR Apache-2.0. The allow-list also permits the

@@ -1,0 +1,19 @@
+[package]
+name = "tpt-fem-eigen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Sparse eigenvalue solvers (power iteration, shift-invert, Lanczos) for tpt-fem."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tpt-fem-sparse = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

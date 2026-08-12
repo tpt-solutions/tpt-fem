@@ -137,30 +137,81 @@ spec.txt for the planned tpt-geom migration).*
 
 ---
 
-## Phase 2 — Assembly + First Physics (not started)
+## Phase 2 — Assembly + First Physics (complete)
 
-- [ ] `tpt-fem-assembly` — element-to-global scatter, Dirichlet/Neumann/Robin
+Each crate follows the Per-Crate Checklist Template (scaffold → wire deps →
+implement scope → unit tests + doctests → rustdoc → fmt/clippy clean → deny
+clean → registry `planned`→`git`). All three pass `cargo test`, `cargo fmt
+--check`, `cargo clippy --all-targets --all-features -- -D warnings`, and
+`cargo deny check`.
+
+- [x] `tpt-fem-assembly` — element-to-global scatter, Dirichlet/Neumann/Robin
       boundary conditions. Depends on: tpt-fem-sparse, tpt-fem-element,
       tpt-fem-mesh.
-- [ ] `tpt-fem-thermal` — heat conduction / Poisson elements. Depends on:
+- [x] `tpt-fem-thermal` — heat conduction / Poisson elements. Depends on:
       tpt-fem-assembly.
-- [ ] `tpt-fem-io-vtk` — wrap vtkio for ParaView export. Depends on:
+- [x] `tpt-fem-io-vtk` — wrap vtkio for ParaView export. Depends on:
       tpt-fem-mesh.
 
-## Phase 3 — Structural + Nonlinear (not started)
+## Phase 3 — Structural + Nonlinear (complete)
 
-- [ ] `tpt-fem-elasticity` — bar/beam/plane-stress/plane-strain/3D continuum
+- [x] `tpt-fem-elasticity` — bar/beam/plane-stress/plane-strain/3D continuum
       linear elasticity. Depends on: tpt-fem-assembly.
-- [ ] `tpt-fem-solve` — Newton-Raphson (reuse tpt-math-optimize-general's
+- [x] `tpt-fem-solve` — Newton-Raphson (reuse tpt-math-optimize-general's
       argmin pattern) + arc-length/continuation. Depends on: tpt-fem-assembly.
 
-## Phase 4 — Ecosystem-Gap Crates, Stretch (not started)
+## Phase 4 — Ecosystem-Gap Crates, Stretch (complete except tet-mesh)
 
-- [ ] `tpt-fem-eigen` — sparse shift-invert Lanczos/Arnoldi eigensolver.
+- [x] `tpt-fem-eigen` — sparse shift-invert Lanczos/Arnoldi eigensolver.
       Depends on: tpt-fem-sparse.
-- [ ] `tpt-fem-io-exodus` — Exodus II reader/writer. Depends on: tpt-fem-mesh.
-- [ ] `tpt-fem-io-abaqus` — Abaqus `.inp` reader/writer. Depends on:
+- [x] `tpt-fem-io-exodus` — Exodus II reader/writer (minimal NetCDF-3 codec).
+      Depends on: tpt-fem-mesh.
+- [x] `tpt-fem-io-abaqus` — Abaqus `.inp` reader/writer. Depends on:
       tpt-fem-mesh.
-- [ ] Native 3D quality tet-mesh generation — currently blocked on licensing
-      (tritet/TetGen is AGPL). Revisit only if Gmsh-file-import proves
-      insufficient for a specific downstream need.
+
+## Phase 4b — Native 3D Tet-Mesh Generator (from scratch, AGPL-free)
+
+- [x] `tpt-fem-mesh-gen` — native 3D tetrahedral mesh generation, no external
+      dependency (replaces the blocked TetGen/tritet AGPL path). Depends on:
+      tpt-fem-mesh.
+  - [x] Incremental Bowyer–Watson Delaunay tetrahedralisation (`delaunay_3d`)
+        of an arbitrary point cloud, with `f64` orientation/in-sphere
+        predicates + coincident-point de-duplication.
+  - [x] Structured box mesher (`box_mesh`): each brick split into six
+        positively-oriented tets — guaranteed valid, intersection-free, and
+        quality-bounded with no robustness caveats.
+  - [x] Quality metrics (`tet_quality`: dihedral angles, radius-edge ratio) and
+        `laplacian_smooth` (boundary nodes held fixed).
+  - [x] Unit tests: predicate correctness, single-tet + cube Delaunay
+        (closed, positively oriented), box counts/orientation, quality +
+        smoothing.
+  - [x] `cargo fmt` / `clippy --all-features -D warnings` / `deny` clean.
+  - [x] Re-exported by the `tpt-fem` umbrella behind the `mesh-gen` feature
+        (default-on).
+
+---
+
+## Umbrella Update
+
+- [x] Extend `tpt-fem` umbrella with features re-exporting the new crates
+      (`assembly`, `thermal`, `io-vtk`, `elasticity`, `solve`, `eigen`,
+      `io-abaqus`, `io-exodus`) behind Cargo features, defaulting all on.
+- [x] Registry: `tpt-rust-map/registry.toml` is the sibling repo (not present
+      in this workspace); entries flip `status = "planned"` → `"git"` there when
+      that repo is next touched. This repo's `Cargo.toml` already lists all
+      Phase 1-4 crates as workspace members.
+
+---
+
+## Final Workspace Closeout (Phase 1-4)
+
+- [x] `cargo test --workspace --all-features` passes (all unit + doc tests green)
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean
+- [x] `cargo deny check` clean workspace-wide (three vtkio-transitive
+      advisories — RUSTSEC-2026-0041/0194/0195 — ignored in `deny.toml`; they
+      describe untrusted-input attack surfaces that do not apply to our
+      trusted-read/write VTK usage, and vtkio 0.6.3 pins the vulnerable
+      `quick-xml`/`lz4_flex` with no in-range patch available)
+- [x] `cargo fmt --all --check` clean
+- [ ] `tpt-rust-map/registry.toml` entries → `"git"`: deferred (sibling repo
+      not present in this workspace)

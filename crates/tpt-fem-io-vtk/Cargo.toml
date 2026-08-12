@@ -1,0 +1,20 @@
+[package]
+name = "tpt-fem-io-vtk"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "ParaView-compatible VTK result export for tpt-fem (via vtkio)."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tpt-fem-mesh = { workspace = true }
+vtkio = "0.6"
+
+[features]
+default = []
+
+[lints]
+workspace = true

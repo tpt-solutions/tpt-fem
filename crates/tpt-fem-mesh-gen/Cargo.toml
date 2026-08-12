@@ -1,0 +1,19 @@
+[package]
+name = "tpt-fem-mesh-gen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Native (dependency-free) 3D tetrahedral mesh generation for tpt-fem: Delaunay tetrahedralisation and structured box meshing."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tpt-fem-mesh = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

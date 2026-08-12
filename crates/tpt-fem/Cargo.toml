@@ -14,13 +14,31 @@ tpt-fem-quadrature = { workspace = true, optional = true }
 tpt-fem-element = { workspace = true, optional = true }
 tpt-fem-mesh = { workspace = true, optional = true }
 tpt-fem-sparse = { workspace = true, optional = true }
+tpt-fem-assembly = { workspace = true, optional = true }
+tpt-fem-thermal = { workspace = true, optional = true }
+tpt-fem-io-vtk = { workspace = true, optional = true }
+tpt-fem-elasticity = { workspace = true, optional = true }
+tpt-fem-solve = { workspace = true, optional = true }
+tpt-fem-eigen = { workspace = true, optional = true }
+tpt-fem-io-abaqus = { workspace = true, optional = true }
+tpt-fem-io-exodus = { workspace = true, optional = true }
+tpt-fem-mesh-gen = { workspace = true, optional = true }
 
 [features]
-default = ["quadrature", "element", "mesh", "sparse"]
+default = ["quadrature", "element", "mesh", "sparse", "assembly", "thermal", "io-vtk", "elasticity", "solve", "eigen", "io-abaqus", "io-exodus", "mesh-gen"]
 quadrature = ["dep:tpt-fem-quadrature"]
 element = ["dep:tpt-fem-element"]
 mesh = ["dep:tpt-fem-mesh"]
 sparse = ["dep:tpt-fem-sparse"]
+assembly = ["dep:tpt-fem-assembly"]
+thermal = ["dep:tpt-fem-thermal"]
+io-vtk = ["dep:tpt-fem-io-vtk"]
+elasticity = ["dep:tpt-fem-elasticity"]
+solve = ["dep:tpt-fem-solve"]
+eigen = ["dep:tpt-fem-eigen"]
+io-abaqus = ["dep:tpt-fem-io-abaqus"]
+io-exodus = ["dep:tpt-fem-io-exodus"]
+mesh-gen = ["dep:tpt-fem-mesh-gen"]
 
 [lints]
 workspace = true

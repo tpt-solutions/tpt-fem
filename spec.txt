@@ -165,6 +165,13 @@ Phase 4 — ecosystem-gap crates, stretch goals (not yet built):
   tpt-fem-io-abaqus
     Build. Abaqus .inp reader/writer. Depends on: tpt-fem-mesh.
 
+  tpt-fem-mesh-gen
+    Build. Native (dependency-free) 3D tetrahedral mesh generation: Bowyer-
+    Watson Delaunay tetrahedralisation of a point cloud and a structured box
+    mesher (bricks -> six quality tets), plus tet-quality metrics and Laplacian
+    smoothing. Written from scratch to avoid the AGPL-licensed TetGen/tritet
+    path; depends on: tpt-fem-mesh.
+
 BUILD ORDER
 tpt-fem-quadrature -> tpt-fem-element -> (tpt-fem-mesh, tpt-fem-sparse, any
 order) -> tpt-fem (umbrella) -> tpt-fem-assembly -> (tpt-fem-thermal,
