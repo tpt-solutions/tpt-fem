@@ -8,7 +8,7 @@ authors.workspace = true
 description = "Umbrella crate re-exporting tpt-fem core crates behind Cargo features."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
+readme = "README.md"
 keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
 categories = ["science", "mathematics", "simulation"]
 

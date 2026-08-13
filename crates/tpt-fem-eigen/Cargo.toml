@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Sparse eigenvalue solvers (power iteration, shift-invert, Lanczos) for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["eigenvalue", "lanczos", "sparse", "fem", "linear-algebra"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 tpt-fem-sparse = { workspace = true }

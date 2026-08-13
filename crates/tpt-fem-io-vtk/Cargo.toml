@@ -8,9 +8,9 @@ authors.workspace = true
 description = "ParaView-compatible VTK result export for tpt-fem (via vtkio)."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["vtk", "paraview", "visualization", "fem", "mesh"]
+categories = ["visualization", "science", "graphics"]
 
 [dependencies]
 tpt-fem-mesh = { workspace = true }

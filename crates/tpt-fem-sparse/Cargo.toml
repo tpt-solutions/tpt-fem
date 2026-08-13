@@ -5,15 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "FEM-specific COO/CSR assembly adapter with a faer-backed sparse solve."
+description = "FEM-specific COO/CSR assembly adapter with a tpt-math-backed solve."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["sparse-matrix", "csr", "linear-algebra", "fem", "solver"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
-faer = "0.19"
+tpt-math-linalg-dense = { git = "https://github.com/tpt-solutions/tpt-math", package = "tpt-math-linalg-dense" }
 
 [features]
 default = []

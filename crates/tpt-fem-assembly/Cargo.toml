@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Element-to-global scatter and Dirichlet/Neumann/Robin boundary conditions for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["finite-element", "assembly", "boundary-conditions", "fem", "sparse"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 tpt-fem-sparse = { workspace = true }

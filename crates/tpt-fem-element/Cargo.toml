@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Reference elements, Lagrange shape functions, and isoparametric Jacobian mapping."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["finite-element", "shape-functions", "lagrange", "isoparametric", "fem"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 tpt-fem-quadrature = { workspace = true }

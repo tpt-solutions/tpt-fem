@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Native (dependency-free) 3D tetrahedral mesh generation for tpt-fem: Delaunay tetrahedralisation and structured box meshing."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["mesh-generation", "delaunay", "tetrahedral", "fem", "mesh"]
+categories = ["science", "algorithms", "data-structures"]
 
 [dependencies]
 tpt-fem-mesh = { workspace = true }

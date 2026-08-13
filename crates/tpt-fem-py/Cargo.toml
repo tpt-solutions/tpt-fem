@@ -8,6 +8,9 @@ authors.workspace = true
 description = "Python bindings for the tpt-fem core (maturin, dev-only this pass)."
 repository.workspace = true
 homepage.workspace = true
+readme = "README.md"
+keywords = ["python", "pyo3", "fem", "bindings", "finite-element"]
+categories = ["science", "api-bindings", "simulation"]
 
 [lib]
 name = "tpt_fem_py"

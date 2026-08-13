@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Newton-Raphson and parameter-continuation nonlinear solvers for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["nonlinear-solver", "newton", "continuation", "fem", "numerical-methods"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 tpt-fem-sparse = { workspace = true }

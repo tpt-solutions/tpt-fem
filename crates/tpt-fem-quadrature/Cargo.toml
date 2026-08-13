@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Gauss quadrature rules for reference finite elements (line/tri/quad/tet/hex)."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["finite-element", "gauss-quadrature", "numerical-integration", "fem", "scientific-computing"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 

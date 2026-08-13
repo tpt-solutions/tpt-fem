@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Command-line driver for the tpt-fem core (solve / mesh info / mesh convert)."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["finite-element", "fem", "simulation", "cli", "command-line"]
+categories = ["command-line-utilities", "science", "simulation"]
 
 [[bin]]
 name = "tpt-fem"

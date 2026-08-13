@@ -8,8 +8,8 @@ authors.workspace = true
 description = "Heat-conduction / Poisson finite-element formulations for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
+readme = "README.md"
+keywords = ["finite-element", "heat-conduction", "poisson", "fem", "pde"]
 categories = ["science", "mathematics", "simulation"]
 
 [dependencies]

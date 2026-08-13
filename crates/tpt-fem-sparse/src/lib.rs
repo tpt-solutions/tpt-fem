@@ -1,4 +1,4 @@
-//! FEM-specific sparse-matrix assembly adapter with a [`faer`]-backed solve.
+//! FEM-specific sparse-matrix assembly adapter with a [`tpt-math-linalg-dense`]-backed solve.
 #![allow(clippy::needless_range_loop)]
 //!
 //! Finite-element assembly naturally produces a sparse global matrix as a bag of
@@ -7,8 +7,9 @@
 //! accumulator that supports duplicate-summing assembly; [`Coo::to_csr`]
 //! collapses it into a canonical compressed-sparse-row [`Csr`] matrix.
 //!
-//! [`solve`] factors the assembled matrix with [`faer`]'s sparse LU
-//! decomposition and solves `A x = b`.
+//! [`solve`] assembles the matrix into a dense [`tpt_math_linalg_dense::DMatrix`]
+//! and solves `A x = b` with the in-house partial-pivot LU decomposition, so the
+//! workspace carries no Apache-2.0-only linear-algebra dependency.
 //!
 //! # Example
 //!
@@ -29,8 +30,7 @@
 //! assert_eq!(csr.values, vec![2.0, 1.0, 1.0, 3.0]);
 //! ```
 
-use faer::sparse::linalg::solvers::{Lu, SpSolver, SymbolicLu};
-use faer::sparse::SparseColMat;
+use tpt_math_linalg_dense::{DMatrix, DVector};
 
 /// A coordinate-list (triplet) accumulator for sparse matrix assembly.
 ///
@@ -186,8 +186,9 @@ impl Csr {
 /// [`Coo`] accumulator, returning the solution vector `x`.
 ///
 /// Duplicate `(row, col)` entries in `coo` are summed (via [`Coo::to_csr`]),
-/// the matrix is factored with [`faer`]'s sparse LU decomposition, and the
-/// system is solved.
+/// the matrix is assembled into a dense
+/// [`tpt_math_linalg_dense::DMatrix`] and factored with the in-house
+/// partial-pivot LU decomposition, and the system is solved.
 pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
     let mut sols = solve_multi(coo, std::slice::from_ref(&rhs.to_vec()))?;
     Ok(sols
@@ -196,13 +197,13 @@ pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
 }
 
 /// Solve `A x_k = rhs[k]` for every right-hand side in `rhs` against the
-/// *same* matrix `A`, factoring it only once.
+/// *same* matrix `A`.
 ///
-/// Equivalent to calling [`solve`] once per right-hand side, but far
-/// cheaper when there is more than one: callers with multiple RHS vectors
-/// against an unchanged `A` (e.g. an arc-length continuation corrector,
-/// which needs both a tangent and a residual-correction solve per
-/// iteration) should prefer this over repeated `solve` calls.
+/// Equivalent to calling [`solve`] once per right-hand side. Callers with
+/// multiple RHS vectors against an unchanged `A` (e.g. an arc-length
+/// continuation corrector, which needs both a tangent and a
+/// residual-correction solve per iteration) should prefer this over repeated
+/// `solve` calls.
 pub fn solve_multi(coo: &Coo, rhs: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, SparseError> {
     let csr = coo.to_csr();
     let n = csr.nrows;
@@ -221,26 +222,22 @@ pub fn solve_multi(coo: &Coo, rhs: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, SparseE
         }
     }
 
-    let mut triplets: Vec<(usize, usize, f64)> = Vec::with_capacity(csr.nnz());
+    let mut data = vec![0.0_f64; n * n];
     for r in 0..n {
         for idx in csr.row_ptrs[r]..csr.row_ptrs[r + 1] {
-            triplets.push((r, csr.col_ind[idx], csr.values[idx]));
+            data[r + csr.col_ind[idx] * n] += csr.values[idx];
         }
     }
+    let mat = DMatrix::from_vec(n, n, data);
 
-    let mat = SparseColMat::<usize, f64>::try_new_from_triplets(n, n, &triplets)
-        .map_err(|e| SparseError::Creation(format!("{e:?}")))?;
-    let symbolic =
-        SymbolicLu::try_new(mat.symbolic()).map_err(|e| SparseError::Symbolic(format!("{e:?}")))?;
-    let lu = Lu::try_new_with_symbolic(symbolic, mat.as_ref())
-        .map_err(|e| SparseError::Numeric(format!("{e:?}")))?;
-
-    let ncols = rhs.len();
-    let mut b = faer::Mat::<f64>::from_fn(n, ncols, |i, j| rhs[j][i]);
-    lu.solve_in_place(b.as_mut());
-    Ok((0..ncols)
-        .map(|j| (0..n).map(|i| b.read(i, j)).collect())
-        .collect())
+    let mut out = Vec::with_capacity(rhs.len());
+    for b in rhs {
+        let x = mat
+            .solve(&DVector::from_vec(b.clone()))
+            .map_err(|e| SparseError::Numeric(format!("{e}")))?;
+        out.push(x.iter().copied().collect());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

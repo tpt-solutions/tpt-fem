@@ -8,9 +8,9 @@ authors.workspace = true
 description = "Mesh data structures, DOF numbering, and Gmsh .msh v4.1 import (via mshio)."
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
-categories = ["science", "mathematics", "simulation"]
+readme = "README.md"
+keywords = ["finite-element", "mesh", "gmsh", "dof-numbering", "fem"]
+categories = ["data-structures", "science", "mathematics"]
 
 [dependencies]
 mshio = "0.4"
