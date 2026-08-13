@@ -1,22 +1,27 @@
 [package]
-name = "tpt-fem-assembly"
+name = "tpt-fem-cli"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Element-to-global scatter and Dirichlet/Neumann/Robin boundary conditions for tpt-fem."
+description = "Command-line driver for the tpt-fem core (solve / mesh info / mesh convert)."
 repository.workspace = true
 homepage.workspace = true
 readme = "../README.md"
 keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
 categories = ["science", "mathematics", "simulation"]
 
+[[bin]]
+name = "tpt-fem"
+path = "src/main.rs"
+
 [dependencies]
-tpt-fem-sparse = { workspace = true }
-tpt-fem-element = { workspace = true }
-tpt-fem-mesh = { workspace = true }
-tpt-fem-quadrature = { workspace = true }
+tpt-fem = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+vtkio = "0.6"
 
 [features]
 default = []

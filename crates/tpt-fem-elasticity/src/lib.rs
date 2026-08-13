@@ -500,11 +500,7 @@ fn beam2d_rotation(phi: f64) -> Vec<Vec<f64>> {
     let c = phi.cos();
     let s = phi.sin();
     let mut r = vec![vec![0.0; 6]; 6];
-    let q = [
-        [c, s, 0.0],
-        [-s, c, 0.0],
-        [0.0, 0.0, 1.0],
-    ];
+    let q = [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]];
     for b in 0..2 {
         for i in 0..3 {
             for j in 0..3 {
@@ -535,7 +531,11 @@ pub fn solve_frame2d(
     let mut rhs = vec![0.0; ndof];
 
     for elem in &mesh.elements {
-        assert_eq!(elem.cell_type, CellType::Line, "solve_frame2d needs Line2 elements");
+        assert_eq!(
+            elem.cell_type,
+            CellType::Line,
+            "solve_frame2d needs Line2 elements"
+        );
         let p0 = mesh.node_coords(elem.nodes[0]);
         let p1 = mesh.node_coords(elem.nodes[1]);
         let dx = p1[0] - p0[0];
@@ -701,11 +701,21 @@ mod tests {
         let u = solve_frame2d(
             &mesh,
             &sec,
-            |node, _| if node == n1 { [0.0, -1.0, 0.0] } else { [0.0, 0.0, 0.0] },
+            |node, _| {
+                if node == n1 {
+                    [0.0, -1.0, 0.0]
+                } else {
+                    [0.0, 0.0, 0.0]
+                }
+            },
             &[(n0 * 3, 0.0), (n0 * 3 + 1, 0.0), (n0 * 3 + 2, 0.0)],
         )
         .unwrap();
-        assert!((u[n1 * 3 + 1] + (1.0 / 3.0)).abs() < 1e-9, "got {}", u[n1 * 3 + 1]);
+        assert!(
+            (u[n1 * 3 + 1] + (1.0 / 3.0)).abs() < 1e-9,
+            "got {}",
+            u[n1 * 3 + 1]
+        );
         assert!((u[n1 * 3 + 2] + 0.5).abs() < 1e-9, "got {}", u[n1 * 3 + 2]);
     }
 
@@ -722,7 +732,13 @@ mod tests {
         let u = solve_frame2d(
             &mesh,
             &sec,
-            |node, _| if node == n1 { [-1.0, 0.0, 0.0] } else { [0.0, 0.0, 0.0] },
+            |node, _| {
+                if node == n1 {
+                    [-1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 0.0, 0.0]
+                }
+            },
             &[(n0 * 3, 0.0), (n0 * 3 + 1, 0.0), (n0 * 3 + 2, 0.0)],
         )
         .unwrap();
@@ -751,9 +767,19 @@ mod tests {
         let u = solve_frame2d(
             &mesh,
             &sec,
-            |node, _| if node == mid { [0.0, -1.0, 0.0] } else { [0.0, 0.0, 0.0] },
+            |node, _| {
+                if node == mid {
+                    [0.0, -1.0, 0.0]
+                } else {
+                    [0.0, 0.0, 0.0]
+                }
+            },
             // Pinned at both ends (v=0) plus one axial roller (u=0 at node 0).
-            &[(nodes[0] * 3, 0.0), (nodes[0] * 3 + 1, 0.0), (nodes[n_elem] * 3 + 1, 0.0)],
+            &[
+                (nodes[0] * 3, 0.0),
+                (nodes[0] * 3 + 1, 0.0),
+                (nodes[n_elem] * 3 + 1, 0.0),
+            ],
         )
         .unwrap();
         assert!(

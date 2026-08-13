@@ -190,7 +190,9 @@ impl Csr {
 /// system is solved.
 pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
     let mut sols = solve_multi(coo, std::slice::from_ref(&rhs.to_vec()))?;
-    Ok(sols.pop().expect("solve_multi returns one solution per rhs"))
+    Ok(sols
+        .pop()
+        .expect("solve_multi returns one solution per rhs"))
 }
 
 /// Solve `A x_k = rhs[k]` for every right-hand side in `rhs` against the

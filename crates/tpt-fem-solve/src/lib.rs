@@ -288,10 +288,7 @@ fn coo_to_dense(coo: &Coo, n: usize) -> Vec<Vec<f64>> {
 /// instead of aborting. The regularisation only affects directions whose
 /// stiffness has collapsed; the spherical predictor/corrector controls the step
 /// magnitude, so the regularised direction is still correct to first order.
-fn dense_solve(
-    a: &[Vec<f64>],
-    b: &[Vec<f64>],
-) -> Result<Vec<Vec<f64>>, ArcLengthError> {
+fn dense_solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, ArcLengthError> {
     let n = a.len();
     let nrhs = b.len();
     let mut m = vec![vec![0.0; n + nrhs]; n];
@@ -520,13 +517,7 @@ pub fn arc_length_continuation(
                 let a2 = dot(&du_acc, &du_acc);
                 let rhs_c = 0.5 * (delta_s * delta_s - a2 - opts.psi * dl_acc * dl_acc);
                 let (du_step, dlambda) = match bordered_solve(
-                    &kt_dense,
-                    &pload,
-                    &du_acc,
-                    dl_acc,
-                    &r_red,
-                    rhs_c,
-                    opts.psi,
+                    &kt_dense, &pload, &du_acc, dl_acc, &r_red, rhs_c, opts.psi,
                 ) {
                     Ok(sol) => sol,
                     Err(_) => break, // singular -> cut back
@@ -558,7 +549,9 @@ pub fn arc_length_continuation(
         prev_dlambda = lambda - lam_start;
 
         // Adaptive arc length toward the target.
-        let factor = (opts.target_iterations as f64 / iters as f64).clamp(0.1, 10.0).sqrt();
+        let factor = (opts.target_iterations as f64 / iters as f64)
+            .clamp(0.1, 10.0)
+            .sqrt();
         delta_s = (delta_s * factor).clamp(opts.min_arc_length, opts.max_arc_length);
 
         if let Some(lim) = opts.lambda_limit {
@@ -689,7 +682,10 @@ mod tests {
             assert!(r.abs() < 1e-5, "off-curve: {r} at λ={lam}");
         }
         let min_lam = trace.iter().map(|(l, _)| *l).fold(f64::INFINITY, f64::min);
-        assert!(min_lam <= -1.7, "did not reach the fold region, min λ = {min_lam}");
+        assert!(
+            min_lam <= -1.7,
+            "did not reach the fold region, min λ = {min_lam}"
+        );
     }
 
     #[test]
@@ -716,14 +712,16 @@ mod tests {
             ..Default::default()
         };
         let u0 = [2.1038, 0.0];
-        let trace =
-            arc_length_continuation(&u0, 3.0, &[], &[1.0, 0.0], res, jac, &opts).unwrap();
+        let trace = arc_length_continuation(&u0, 3.0, &[], &[1.0, 0.0], res, jac, &opts).unwrap();
         for (lam, u) in trace.iter().skip(1) {
             let r = res(u, *lam);
             assert!(r[0].abs() < 1e-5 && r[1].abs() < 1e-9, "off-curve: {r:?}");
         }
         let min_lam = trace.iter().map(|(l, _)| *l).fold(f64::INFINITY, f64::min);
-        assert!(min_lam <= -1.7, "did not reach the fold region, min λ = {min_lam}");
+        assert!(
+            min_lam <= -1.7,
+            "did not reach the fold region, min λ = {min_lam}"
+        );
         // Second DOF stays pinned at 0 (verifies the 2-D bordered solve tracks it).
         let max_u1 = trace
             .iter()

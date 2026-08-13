@@ -1,55 +1,136 @@
 # tpt-fem
 
 A modular finite-element method (FEM) workspace for Rust, part of the
-`tpt-solutions` ecosystem. This repository currently hosts **Phase 1** of the
-planned `tpt-fem` stack: the five foundational, dependency-light core crates
-used by every higher-level FEM crate.
+`tpt-solutions` ecosystem. It provides a from-the-ground-up FEM core — reference
+elements, quadrature, mesh I/O, sparse assembly, physics (thermal, elasticity),
+eigen- and continuation-solvers, a native tet-mesh generator, and a CLI driver —
+all under a permissive `MIT OR Apache-2.0` policy.
 
-## Crates (Phase 1)
+Crates.io publishing is intentionally **out of scope** for this repository; the
+crates are consumed as path dependencies within the workspace.
+
+## Crates
 
 | Crate | Purpose | Depends on |
 |-------|---------|------------|
 | [`tpt-fem-quadrature`](crates/tpt-fem-quadrature) | Fixed-order Gauss quadrature on reference elements (line / tri / quad / tet / hex). | — |
 | [`tpt-fem-element`](crates/tpt-fem-element) | Reference elements, Lagrange `P1` shape functions, isoparametric Jacobian map. | `tpt-fem-quadrature` |
-| [`tpt-fem-mesh`](crates/tpt-fem-mesh) | Mesh data model, DOF numbering, Gmsh `.msh` v4.1 import (via `mshio`). | `mshio` |
+| [`tpt-fem-mesh`](crates/tpt-fem-mesh) | Mesh data model, DOF numbering, Gmsh `.msh` v4.1 import (via `mshio`), region selectors. | `mshio` |
 | [`tpt-fem-sparse`](crates/tpt-fem-sparse) | FEM-specific COO/CSR assembly adapter with a `faer`-backed sparse LU solve. | `faer` |
-| [`tpt-fem`](crates/tpt-fem) | Umbrella crate re-exporting the above behind Cargo features, plus the end-to-end patch test. | all of the above |
+| [`tpt-fem-assembly`](crates/tpt-fem-assembly) | Element-to-global scatter, Dirichlet/Neumann/Robin boundary conditions, reduced-system extraction. | `tpt-fem-{sparse,element,mesh}` |
+| [`tpt-fem-thermal`](crates/tpt-fem-thermal) | Heat-conduction / Poisson elements (`-∇·(k∇u) = f`). | `tpt-fem-assembly` |
+| [`tpt-fem-io-vtk`](crates/tpt-fem-io-vtk) | ParaView `.vtk` / `.vtu` export (via `vtkio`). | `tpt-fem-mesh`, `vtkio` |
+| [`tpt-fem-elasticity`](crates/tpt-fem-elasticity) | 2-D Euler–Bernoulli frames, and 2-D/3-D continuum linear elasticity. | `tpt-fem-assembly` |
+| [`tpt-fem-solve`](crates/tpt-fem-solve) | Newton–Raphson and real arc-length (Crisfield) continuation. | `tpt-fem-assembly` |
+| [`tpt-fem-eigen`](crates/tpt-fem-eigen) | Sparse shift-invert Lanczos/Arnoldi eigensolver, including the generalized `Kx = λMx` problem. | `tpt-fem-sparse` |
+| [`tpt-fem-io-abaqus`](crates/tpt-fem-io-abaqus) | Abaqus `.inp` reader/writer. | `tpt-fem-mesh` |
+| [`tpt-fem-io-exodus`](crates/tpt-fem-io-exodus) | Exodus II reader/writer (hand-rolled NetCDF-3 codec). | `tpt-fem-mesh` |
+| [`tpt-fem-mesh-gen`](crates/tpt-fem-mesh-gen) | Native 3-D tetrahedral mesh generation (Delaunay + structured box), dependency-free. | `tpt-fem-mesh` |
+| [`tpt-fem`](crates/tpt-fem) | Umbrella crate re-exporting all of the above behind Cargo features, plus `prelude` and end-to-end tests. | all of the above |
+| [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `mesh info`, `mesh convert`. | `tpt-fem` |
 
-The umbrella crate's feature flags are: `quadrature`, `element`, `mesh`, and
-`sparse` (all enabled by default).
+Every crate is tracked as `git` in the sibling
+[`tpt-rust-map/registry.toml`](https://github.com/tpt-solutions/tpt-rust-map).
 
-## Pipeline
+## Umbrella feature flags
 
-A standard steady-diffusion solve flows through the crates as:
+The `tpt-fem` umbrella re-exports each constituent behind a Cargo feature
+(`quadrature`, `element`, `mesh`, `sparse`, `assembly`, `thermal`, `io-vtk`,
+`elasticity`, `solve`, `eigen`, `io-abaqus`, `io-exodus`, `mesh-gen`). **All are
+enabled by default.** `use tpt_fem::prelude::*;` pulls in the public API of every
+enabled crate.
 
+## Quick start
+
+Add the umbrella (or individual crates) as a path dependency, then:
+
+```rust
+use tpt_fem::prelude::*;
+
+// Build a structured 3-D tet mesh of the unit cube and solve -∇²u = 1.
+let mesh = box_mesh([0.0; 3], [1.0; 3], [8, 8, 8]);
+let mut bcs = Vec::new();
+for axis in 0..3 {
+    for &c in &[0.0, 1.0] {
+        for n in mesh.nodes_on_plane(axis, c, 1e-9) {
+            bcs.push((n, 0.0));
+        }
+    }
+}
+let u = solve_poisson(&mesh, 1.0, 2, |_| 1.0, &bcs, None, None).unwrap();
+write_vtk_with_data(&mesh, &[PointData::new("u", u)], "out.vtk").unwrap();
 ```
-reference-element shape functions + gradients   (tpt-fem-element)
-        + quadrature rules                        (tpt-fem-quadrature)
-        -> per-element stiffness matrices
-        -> triplet accumulation into a COO        (tpt-fem-sparse)
-        -> CSR, sparse LU factorization + solve    (tpt-fem-sparse / faer)
+
+A runnable version lives in
+[`crates/tpt-fem/examples/thermal_solve.rs`](crates/tpt-fem/examples/thermal_solve.rs)
+(`cargo run -p tpt-fem --example thermal_solve`).
+
+See also:
+
+* [`crates/tpt-fem/tests/patch_test.rs`](crates/tpt-fem/tests/patch_test.rs) —
+  low-level element-loop patch test.
+* [`crates/tpt-fem/tests/end_to_end.rs`](crates/tpt-fem/tests/end_to_end.rs) —
+  real `mesh → solve → VTK` path.
+* [`crates/tpt-fem-thermal/tests/mms_convergence.rs`](crates/tpt-fem-thermal/tests/mms_convergence.rs) —
+  Method-of-Manufactured-Solutions convergence (L2/H1 rates).
+
+## Command-line driver
+
+```bash
+# Solve a Poisson problem from a TOML config (see crates/tpt-fem-cli for schema).
+cargo run -p tpt-fem-cli -- solve problem.toml
+
+# Inspect a mesh (.msh or .vtk).
+cargo run -p tpt-fem-cli -- mesh info mesh.msh
+
+# Convert a Gmsh .msh mesh to a ParaView .vtk file.
+cargo run -p tpt-fem-cli -- mesh convert mesh.msh mesh.vtk
 ```
 
-The integration test `tpt-fem/tests/patch_test.rs` drives this entire pipeline
-on a hand-built multi-element mesh and checks the result against an analytical
-solution.
+A `problem.toml` looks like:
+
+```toml
+[problem]
+type = "poisson"            # only "poisson" supported this pass
+
+[mesh]
+dim = 2                    # 2 or 3; or set `file = "mesh.msh"` to import
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+conductivity = 1.0
+
+[source]
+constant = 1.0             # volumetric source f(x)
+
+[[bc]]
+value = 0.0
+boundary = true            # selectors: nodes / plane / box / region / boundary
+
+[output]
+vtk = "solution.vtk"
+```
 
 ## Building & testing
 
 ```bash
-cargo build --workspace --all-features
-cargo test  --workspace --all-features
-cargo fmt   --all --check
+cargo build  --workspace --all-features
+cargo test   --workspace --all-features
+cargo fmt    --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo deny  check
+cargo deny   check
 ```
+
+A `Justfile` wraps these (and the `cargo run` examples) for convenience.
 
 ## Status
 
-Phase 1 (`tpt-fem-quadrature`, `tpt-fem-element`, `tpt-fem-mesh`,
-`tpt-fem-sparse`, `tpt-fem`) is implemented and tracked as `git` in
-[`registry.toml`](../../registry.toml). Follow-up phases (assembly, I/O,
-solvers, elasticity, etc.) remain `planned`.
+Phases 1–4 (core, assembly, first physics, structural/nonlinear, ecosystem-gap
+crates) and the hardening/completeness passes (Phase 5 error ergonomics &
+validation, Phase 6 physics completeness) are implemented. The CLI, MMS
+convergence suite, fuzz targets, and Python bindings (Phase 7–8) are in progress.
 
 ## License
 

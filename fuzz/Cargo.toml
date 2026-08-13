@@ -1,0 +1,48 @@
+[package]
+name = "tpt-fem-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.tpt-fem-mesh]
+path = "../crates/tpt-fem-mesh"
+
+[dependencies.tpt-fem-io-exodus]
+path = "../crates/tpt-fem-io-exodus"
+
+[dependencies.tpt-fem-io-abaqus]
+path = "../crates/tpt-fem-io-abaqus"
+
+[[bin]]
+name = "exodus_decode"
+path = "fuzz_targets/exodus_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gmsh_import"
+path = "fuzz_targets/gmsh_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "abaqus_inp"
+path = "fuzz_targets/abaqus_inp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "exodus_roundtrip"
+path = "fuzz_targets/exodus_roundtrip.rs"
+test = false
+doc = false
+bench = false

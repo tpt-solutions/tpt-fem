@@ -262,7 +262,9 @@ impl Mesh {
         let min_tag = nodes_section.min_node_tag;
         for block in &nodes_section.node_blocks {
             let block_start = nodes.len();
-            let region = region_map.get(&(block.entity_dim, block.entity_tag)).copied();
+            let region = region_map
+                .get(&(block.entity_dim, block.entity_tag))
+                .copied();
             match &block.node_tags {
                 // Sparse tags: the map gives tag -> local index within the block.
                 Some(map) => {
@@ -305,7 +307,9 @@ impl Mesh {
                 other => return Err(MeshError::UnsupportedElementType(other as u8)),
             };
             let expected = cell.node_count();
-            let region = region_map.get(&(block.entity_dim, block.entity_tag)).copied();
+            let region = region_map
+                .get(&(block.entity_dim, block.entity_tag))
+                .copied();
             for element in &block.elements {
                 if element.nodes.len() != expected {
                     return Err(MeshError::UnsupportedElementType(block.element_type as u8));
@@ -313,7 +317,12 @@ impl Mesh {
                 let node_ids: Vec<NodeId> = element
                     .nodes
                     .iter()
-                    .map(|t| tag_to_id.get(t).copied().ok_or(MeshError::DanglingNodeTag(*t)))
+                    .map(|t| {
+                        tag_to_id
+                            .get(t)
+                            .copied()
+                            .ok_or(MeshError::DanglingNodeTag(*t))
+                    })
                     .collect::<Result<_, _>>()?;
                 let id = elements.len();
                 elements.push(Element {

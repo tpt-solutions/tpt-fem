@@ -8,6 +8,9 @@ authors.workspace = true
 description = "Linear elasticity (bar, plane-stress, plane-strain, 3D continuum) for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
+readme = "../README.md"
+keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
+categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
 tpt-fem-assembly = { workspace = true }
@@ -22,3 +25,4 @@ default = []
 
 [lints]
 workspace = true
+

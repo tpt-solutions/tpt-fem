@@ -317,8 +317,7 @@ pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSys
     let csr = coo.to_csr();
     let fixed: HashSet<usize> = bcs.iter().map(|(i, _)| *i).collect();
     let free: Vec<usize> = (0..n).filter(|i| !fixed.contains(i)).collect();
-    let free_idx: HashMap<usize, usize> =
-        free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
+    let free_idx: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
 
     let mut kred = Coo::new();
     let mut fred = vec![0.0; free.len()];

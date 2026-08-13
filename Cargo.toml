@@ -14,9 +14,10 @@ members = [
     "crates/tpt-fem-io-abaqus",
     "crates/tpt-fem-io-exodus",
     "crates/tpt-fem-mesh-gen",
+    "crates/tpt-fem-cli",
     "crates/tpt-fem",
 ]
-exclude = []
+exclude = ["fuzz", "crates/tpt-fem-py"]
 
 [workspace.package]
 description = "tpt-fem — mesh-based finite element method core for tpt-solutions"

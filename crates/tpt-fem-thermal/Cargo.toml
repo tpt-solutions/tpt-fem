@@ -8,6 +8,9 @@ authors.workspace = true
 description = "Heat-conduction / Poisson finite-element formulations for tpt-fem."
 repository.workspace = true
 homepage.workspace = true
+readme = "../README.md"
+keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"]
+categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
 tpt-fem-assembly = { workspace = true }
@@ -16,8 +19,15 @@ tpt-fem-element = { workspace = true }
 tpt-fem-mesh = { workspace = true }
 tpt-fem-quadrature = { workspace = true }
 
+[dev-dependencies]
+tpt-fem-mesh = { workspace = true }
+tpt-fem-element = { workspace = true }
+tpt-fem-quadrature = { workspace = true }
+tpt-fem-mesh-gen = { workspace = true }
+
 [features]
 default = []
 
 [lints]
 workspace = true
+

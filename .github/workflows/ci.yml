@@ -18,7 +18,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --check
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
 
   clippy:
     runs-on: ubuntu-latest
@@ -27,6 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
@@ -34,7 +36,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features
+
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --all-features
+
+  # wasm32 target check. The pure-math crates (quadrature/element/mesh) must
+  # build cleanly for wasm32; sparse is allowed to soft-fail pending
+  # confirmation of the faer -> rayon wasm32 compatibility risk.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: wasm (hard-fail core crates)
+        run: |
+          for c in tpt-fem-quadrature tpt-fem-element tpt-fem-mesh; do
+            cargo build -p $c --target wasm32-unknown-unknown
+          done
+      - name: wasm (soft-fail sparse)
+        run: cargo build -p tpt-fem-sparse --target wasm32-unknown-unknown || true
+
+  fuzz-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: compile-only fuzz targets
+        run: |
+          cd fuzz
+          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip; do
+            cargo +nightly build --bin $t
+          done
 
   # No no_std job: every tpt-fem-* crate needs std (Vec/HashMap-backed mesh
   # and sparse-matrix data structures, file I/O for mesh import), unlike

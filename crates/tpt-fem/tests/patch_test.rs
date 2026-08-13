@@ -10,10 +10,8 @@
 //! discretisation reproduces it to machine precision — the classic patch test.
 #![allow(clippy::needless_range_loop)]
 
-use std::collections::{HashMap, HashSet};
-
 use tpt_fem::{
-    gauss_legendre, solve, CellType, Coo, Csr, Line2, Map, MeshBuilder, ReferenceElement,
+    gauss_legendre, solve_with_dirichlet, CellType, Coo, Line2, Map, MeshBuilder, ReferenceElement,
 };
 
 /// Assemble the global stiffness matrix for `-u'' = 0` on the mesh and solve
@@ -53,43 +51,7 @@ fn patch_solve(mesh: &tpt_fem::Mesh, bcs: &[(usize, f64)]) -> Vec<f64> {
         }
     }
 
-    solve_with_dirichlet(&coo, &vec![0.0; ndof], bcs)
-}
-
-/// Reduce the system for the fixed DOFs, solve, and scatter the solution back.
-fn solve_with_dirichlet(coo: &Coo, f: &[f64], bcs: &[(usize, f64)]) -> Vec<f64> {
-    let n = f.len();
-    let csr: Csr = coo.to_csr();
-    let fixed: HashSet<usize> = bcs.iter().map(|(i, _)| *i).collect();
-    let free: Vec<usize> = (0..n).filter(|i| !fixed.contains(i)).collect();
-    let free_idx: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
-
-    let mut kred = Coo::new();
-    let mut fred = vec![0.0; free.len()];
-    for &fdof in &free {
-        let mut rhs = f[fdof];
-        for c in csr.row_ptrs[fdof]..csr.row_ptrs[fdof + 1] {
-            let col = csr.col_ind[c];
-            let v = csr.values[c];
-            if fixed.contains(&col) {
-                let bc = bcs.iter().find(|(i, _)| *i == col).unwrap().1;
-                rhs -= v * bc;
-            } else {
-                kred.push(free_idx[&fdof], free_idx[&col], v);
-            }
-        }
-        fred[free_idx[&fdof]] = rhs;
-    }
-
-    let x = solve(&kred, &fred).expect("sparse solve");
-    let mut u = vec![0.0; n];
-    for (i, &dof) in free.iter().enumerate() {
-        u[dof] = x[i];
-    }
-    for (i, val) in bcs {
-        u[*i] = *val;
-    }
-    u
+    solve_with_dirichlet(&coo, &vec![0.0; ndof], bcs).expect("solve")
 }
 
 #[test]
