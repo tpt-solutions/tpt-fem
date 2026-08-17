@@ -1,24 +1,24 @@
 [package]
 name = "tpt-fem-py"
 version = "0.1.0"
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-authors.workspace = true
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["TPT Solutions"]
 description = "Python bindings for the tpt-fem core (maturin, dev-only this pass)."
-repository.workspace = true
-homepage.workspace = true
+repository = "https://github.com/tpt-solutions/tpt-fem"
+homepage = "https://github.com/tpt-solutions/tpt-fem"
 readme = "README.md"
 keywords = ["python", "pyo3", "fem", "bindings", "finite-element"]
 categories = ["science", "api-bindings", "simulation"]
 
 [lib]
-name = "tpt_fem_py"
+name = "tpt_fem"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tpt-fem = { workspace = true }
-pyo3 = { version = "0.22", features = ["extension-module"] }
+tpt-fem = { version = "0.1.0", path = "../tpt-fem" }
+pyo3 = { version = "0.23", features = ["extension-module"] }
 
 [features]
 default = []

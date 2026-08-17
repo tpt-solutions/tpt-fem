@@ -33,19 +33,19 @@ pip install target/wheels/*.whl
 ## Usage
 
 ```python
-import tpt_fem_py as fem
+import tpt_fem as fem
 
 # Build a structured box mesh.
-mesh = fem.Mesh.box_mesh((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (8, 8, 8))
+mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [8, 8, 8])
 
-# Solve -∇·(∇u) = 1 with a Python source callable.
+# Solve -∇·(k∇u) = 1 with a Python source callable.
 def source(x, y, z):
     return 1.0
 
-u = fem.solve_poisson(mesh, source)
+u = fem.solve_poisson(mesh, 1.0, 2, source, [])
 
 # Export the solution to VTK.
-mesh.write_vtk("result.vtk")
+mesh.write_vtk("result.vtk", "u", u)
 ```
 
 ## API highlights
@@ -57,7 +57,7 @@ mesh.write_vtk("result.vtk")
 | `Mesh.coords` | Node coordinate array. |
 | `Mesh.nodes_on_plane(...)` / `Mesh.nodes_in_box(...)` | Node selection helpers. |
 | `Mesh.write_vtk(path)` | Export to VTK. |
-| `solve_poisson(mesh, source)` | Solve Poisson with constant or callable source. |
+| `solve_poisson(mesh, conductivity, quad_order, source, bcs)` | Solve Poisson with constant or callable source. |
 
 ## Position in the crate stack
 

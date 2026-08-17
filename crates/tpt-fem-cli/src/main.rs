@@ -277,6 +277,28 @@ fn cell_face_nodes(cell: CellType, fi: usize) -> &'static [usize] {
             [0, 4, 7, 3],
             [1, 5, 6, 2],
         ][fi],
+        // Quadratic (P2) faces are keyed by corner nodes, matching
+        // `tpt-fem-assembly`'s `faces_of` definitions.
+        CellType::Tri6 => &[[1, 2], [2, 0], [0, 1]][fi],
+        CellType::Quad8 => &[[0, 1], [1, 2], [2, 3], [3, 0]][fi],
+        CellType::Quad9 => &[[0, 6], [6, 8], [8, 2], [2, 0]][fi],
+        CellType::Tet10 => &[[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]][fi],
+        CellType::Hex20 => &[
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [3, 2, 6, 7],
+            [0, 4, 7, 3],
+            [1, 5, 6, 2],
+        ][fi],
+        CellType::Hex27 => &[
+            [0, 18, 24, 6],
+            [2, 20, 26, 8],
+            [0, 18, 20, 2],
+            [6, 24, 26, 8],
+            [0, 2, 8, 6],
+            [18, 20, 26, 24],
+        ][fi],
     }
 }
 
@@ -461,7 +483,12 @@ fn mesh_from_vtk(vtk: &vtkio::model::Vtk) -> Result<Mesh, Err> {
             2 => CellType::Line,
             3 => CellType::Tri,
             4 => CellType::Quad,
+            6 => CellType::Tri6,
             8 => CellType::Hex,
+            9 => CellType::Quad9,
+            10 => CellType::Tet10,
+            20 => CellType::Hex20,
+            27 => CellType::Hex27,
             _ => return Err(format!("unsupported cell with {cnt} nodes").into()),
         };
         let nodes = verts[i + 1..i + 1 + cnt]

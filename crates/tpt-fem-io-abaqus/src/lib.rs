@@ -62,9 +62,16 @@ fn abaqus_type_to_cell(ty: &str) -> Option<CellType> {
     match ty.trim().to_uppercase().as_str() {
         "T2D2" | "C1D2" | "B31" => Some(CellType::Line),
         "CPS3" | "CPE3" | "S3" | "STRI3" | "M3D3" | "R3D3" => Some(CellType::Tri),
-        "CPS4" | "CPE4" | "S4" | "M3D4" | "R3D4" => Some(CellType::Quad),
-        "C3D4" | "S4R" => Some(CellType::Tet),
+        "CPS4" | "CPE4" | "S4" | "S4R" | "M3D4" | "R3D4" => Some(CellType::Quad),
+        "C3D4" => Some(CellType::Tet),
         "C3D8" | "C3D8R" | "C3D8H" | "S8R" => Some(CellType::Hex),
+        // Quadratic (P2) families.
+        "CPS6" | "CPE6" | "STRI65" => Some(CellType::Tri6),
+        "CPS8" | "CPE8" | "S8" => Some(CellType::Quad8),
+        "CPS9" | "CPE9" => Some(CellType::Quad9),
+        "C3D10" => Some(CellType::Tet10),
+        "C3D20" | "C3D20R" | "C3D20H" => Some(CellType::Hex20),
+        "C3D27" | "C3D27R" => Some(CellType::Hex27),
         _ => None,
     }
 }
@@ -77,6 +84,12 @@ fn cell_to_abaqus_type(cell: CellType) -> &'static str {
         CellType::Quad => "CPS4",
         CellType::Tet => "C3D4",
         CellType::Hex => "C3D8",
+        CellType::Tri6 => "CPS6",
+        CellType::Quad8 => "CPS8",
+        CellType::Quad9 => "CPS9",
+        CellType::Tet10 => "C3D10",
+        CellType::Hex20 => "C3D20",
+        CellType::Hex27 => "C3D27",
     }
 }
 
@@ -259,6 +272,16 @@ mod tests {
             read_inp(text),
             Err(InpError::UnknownElementType(_))
         ));
+    }
+
+    #[test]
+    fn s4r_shell_quad_maps_to_quad() {
+        // S4R is a 4-node shell quadrilateral, not a tetrahedron.
+        let text = "*NODE\n1, 0.0, 0.0, 0.0\n2, 1.0, 0.0, 0.0\n3, 1.0, 1.0, 0.0\n4, 0.0, 1.0, 0.0\n*ELEMENT, TYPE=S4R\n1, 1, 2, 3, 4\n";
+        let mesh = read_inp(text).unwrap();
+        assert_eq!(mesh.node_count(), 4);
+        assert_eq!(mesh.element_count(), 1);
+        assert_eq!(mesh.elements[0].cell_type, CellType::Quad);
     }
 
     #[test]

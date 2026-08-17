@@ -1,0 +1,7 @@
+# Local build artifacts for the excluded pyo3/maturin crate.
+/target
+.pytest_cache
+__pycache__
+*.pyc
+*.so
+*.pyd

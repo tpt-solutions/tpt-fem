@@ -13,7 +13,9 @@
 
 use tpt_fem_assembly::{assemble, reduce_system, solve_with_dirichlet};
 use tpt_fem_eigen::generalized_lanczos_eigs;
-use tpt_fem_element::{Hex8, Line2, Map, Quad4, ReferenceElement, Tet4, Tri3};
+use tpt_fem_element::{
+    Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
+};
 use tpt_fem_mesh::{CellType, Mesh};
 use tpt_fem_quadrature::{
     gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
@@ -41,6 +43,12 @@ fn ref_dim(cell: CellType) -> usize {
         CellType::Quad => Quad4::DIM,
         CellType::Tet => Tet4::DIM,
         CellType::Hex => Hex8::DIM,
+        CellType::Tri6 => Tri6::DIM,
+        CellType::Quad8 => Quad8::DIM,
+        CellType::Quad9 => Quad9::DIM,
+        CellType::Tet10 => Tet10::DIM,
+        CellType::Hex20 => Hex20::DIM,
+        CellType::Hex27 => Hex27::DIM,
     }
 }
 
@@ -51,6 +59,12 @@ fn ref_shape(cell: CellType, xi: &[f64]) -> Vec<f64> {
         CellType::Quad => Quad4::shape(xi),
         CellType::Tet => Tet4::shape(xi),
         CellType::Hex => Hex8::shape(xi),
+        CellType::Tri6 => Tri6::shape(xi),
+        CellType::Quad8 => Quad8::shape(xi),
+        CellType::Quad9 => Quad9::shape(xi),
+        CellType::Tet10 => Tet10::shape(xi),
+        CellType::Hex20 => Hex20::shape(xi),
+        CellType::Hex27 => Hex27::shape(xi),
     }
 }
 
@@ -61,6 +75,12 @@ fn ref_grad(cell: CellType, xi: &[f64]) -> Vec<Vec<f64>> {
         CellType::Quad => Quad4::grad(xi),
         CellType::Tet => Tet4::grad(xi),
         CellType::Hex => Hex8::grad(xi),
+        CellType::Tri6 => Tri6::grad(xi),
+        CellType::Quad8 => Quad8::grad(xi),
+        CellType::Quad9 => Quad9::grad(xi),
+        CellType::Tet10 => Tet10::grad(xi),
+        CellType::Hex20 => Hex20::grad(xi),
+        CellType::Hex27 => Hex27::grad(xi),
     }
 }
 
@@ -93,6 +113,37 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
         }
         CellType::Hex => {
             let r = tensor_cube(&gauss_legendre(order));
+            (
+                r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
+                r.weights,
+            )
+        }
+        // P2 elements need higher-order rules: the mass matrix involves
+        // NᵀN (degree 4), so bump the tensor-product/1-D rules by one and use
+        // the highest fixed simplex rules.
+        CellType::Tri6 => {
+            let r = triangle(TriangleRule::HammerStroud);
+            (
+                r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Quad8 | CellType::Quad9 => {
+            let r = tensor_square(&gauss_legendre(order + 1));
+            (
+                r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Tet10 => {
+            let r = tetrahedron(TetrahedronRule::Keast4);
+            (
+                r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Hex20 | CellType::Hex27 => {
+            let r = tensor_cube(&gauss_legendre(order + 1));
             (
                 r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
                 r.weights,

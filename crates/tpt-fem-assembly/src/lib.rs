@@ -16,7 +16,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tpt_fem_element::{Hex8, Line2, Quad4, ReferenceElement, Tet4, Tri3};
+use tpt_fem_element::{
+    Hex20, Hex27, Hex8, Line2, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
+};
 use tpt_fem_mesh::{CellType, ElementId, Mesh};
 use tpt_fem_quadrature::{gauss_legendre, tensor_square, triangle, TriangleRule};
 use tpt_fem_sparse::{solve, Coo, SparseError};
@@ -119,6 +121,52 @@ const HEX_FACES: &[FaceDef] = &[
     },
 ];
 
+// Quadratic (P2) faces are keyed by their *corner* nodes only — the corner set
+// uniquely identifies an edge/face, which is all `boundary_faces` needs to
+// detect unshared (boundary) faces. Mid/center nodes are omitted. The corner
+// local indices follow `tpt-fem-element`'s reference ordering: `Quad9` and
+// `Hex27` interleave their interior/mid nodes, so their corners are not the
+// first four/eight indices.
+const TRI6_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[1, 2], face: CellType::Line },
+    FaceDef { nodes: &[2, 0], face: CellType::Line },
+    FaceDef { nodes: &[0, 1], face: CellType::Line },
+];
+const QUAD8_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[0, 1], face: CellType::Line },
+    FaceDef { nodes: &[1, 2], face: CellType::Line },
+    FaceDef { nodes: &[2, 3], face: CellType::Line },
+    FaceDef { nodes: &[3, 0], face: CellType::Line },
+];
+const QUAD9_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[0, 6], face: CellType::Line },
+    FaceDef { nodes: &[6, 8], face: CellType::Line },
+    FaceDef { nodes: &[8, 2], face: CellType::Line },
+    FaceDef { nodes: &[2, 0], face: CellType::Line },
+];
+const TET10_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[1, 2, 3], face: CellType::Tri },
+    FaceDef { nodes: &[0, 2, 3], face: CellType::Tri },
+    FaceDef { nodes: &[0, 1, 3], face: CellType::Tri },
+    FaceDef { nodes: &[0, 1, 2], face: CellType::Tri },
+];
+const HEX20_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[0, 1, 2, 3], face: CellType::Quad },
+    FaceDef { nodes: &[4, 5, 6, 7], face: CellType::Quad },
+    FaceDef { nodes: &[0, 1, 5, 4], face: CellType::Quad },
+    FaceDef { nodes: &[3, 2, 6, 7], face: CellType::Quad },
+    FaceDef { nodes: &[0, 4, 7, 3], face: CellType::Quad },
+    FaceDef { nodes: &[1, 5, 6, 2], face: CellType::Quad },
+];
+const HEX27_FACES: &[FaceDef] = &[
+    FaceDef { nodes: &[0, 18, 24, 6], face: CellType::Quad },
+    FaceDef { nodes: &[2, 20, 26, 8], face: CellType::Quad },
+    FaceDef { nodes: &[0, 18, 20, 2], face: CellType::Quad },
+    FaceDef { nodes: &[6, 24, 26, 8], face: CellType::Quad },
+    FaceDef { nodes: &[0, 2, 8, 6], face: CellType::Quad },
+    FaceDef { nodes: &[18, 20, 26, 24], face: CellType::Quad },
+];
+
 fn faces_of(cell: CellType) -> &'static [FaceDef] {
     match cell {
         CellType::Line => LINE_FACES,
@@ -126,6 +174,12 @@ fn faces_of(cell: CellType) -> &'static [FaceDef] {
         CellType::Quad => QUAD_FACES,
         CellType::Tet => TET_FACES,
         CellType::Hex => HEX_FACES,
+        CellType::Tri6 => TRI6_FACES,
+        CellType::Quad8 => QUAD8_FACES,
+        CellType::Quad9 => QUAD9_FACES,
+        CellType::Tet10 => TET10_FACES,
+        CellType::Hex20 => HEX20_FACES,
+        CellType::Hex27 => HEX27_FACES,
     }
 }
 
@@ -137,6 +191,12 @@ fn ref_nodes(cell: CellType) -> Vec<Vec<f64>> {
         CellType::Quad => Quad4::nodes(),
         CellType::Tet => Tet4::nodes(),
         CellType::Hex => Hex8::nodes(),
+        CellType::Tri6 => Tri6::nodes(),
+        CellType::Quad8 => Quad8::nodes(),
+        CellType::Quad9 => Quad9::nodes(),
+        CellType::Tet10 => Tet10::nodes(),
+        CellType::Hex20 => Hex20::nodes(),
+        CellType::Hex27 => Hex27::nodes(),
     }
 }
 
@@ -148,6 +208,12 @@ fn ref_shape(cell: CellType, xi: &[f64]) -> Vec<f64> {
         CellType::Quad => Quad4::shape(xi),
         CellType::Tet => Tet4::shape(xi),
         CellType::Hex => Hex8::shape(xi),
+        CellType::Tri6 => Tri6::shape(xi),
+        CellType::Quad8 => Quad8::shape(xi),
+        CellType::Quad9 => Quad9::shape(xi),
+        CellType::Tet10 => Tet10::shape(xi),
+        CellType::Hex20 => Hex20::shape(xi),
+        CellType::Hex27 => Hex27::shape(xi),
     }
 }
 
@@ -159,6 +225,12 @@ fn ref_grad(cell: CellType, xi: &[f64]) -> Vec<Vec<f64>> {
         CellType::Quad => Quad4::grad(xi),
         CellType::Tet => Tet4::grad(xi),
         CellType::Hex => Hex8::grad(xi),
+        CellType::Tri6 => Tri6::grad(xi),
+        CellType::Quad8 => Quad8::grad(xi),
+        CellType::Quad9 => Quad9::grad(xi),
+        CellType::Tet10 => Tet10::grad(xi),
+        CellType::Hex20 => Hex20::grad(xi),
+        CellType::Hex27 => Hex27::grad(xi),
     }
 }
 
@@ -170,6 +242,12 @@ fn ref_dim(cell: CellType) -> usize {
         CellType::Quad => Quad4::DIM,
         CellType::Tet => Tet4::DIM,
         CellType::Hex => Hex8::DIM,
+        CellType::Tri6 => Tri6::DIM,
+        CellType::Quad8 => Quad8::DIM,
+        CellType::Quad9 => Quad9::DIM,
+        CellType::Tet10 => Tet10::DIM,
+        CellType::Hex20 => Hex20::DIM,
+        CellType::Hex27 => Hex27::DIM,
     }
 }
 

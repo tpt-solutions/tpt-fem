@@ -16,7 +16,7 @@ crates are consumed as path dependencies within the workspace.
 | [`tpt-fem-quadrature`](crates/tpt-fem-quadrature) | Fixed-order Gauss quadrature on reference elements (line / tri / quad / tet / hex). | — |
 | [`tpt-fem-element`](crates/tpt-fem-element) | Reference elements, Lagrange `P1` shape functions, isoparametric Jacobian map. | `tpt-fem-quadrature` |
 | [`tpt-fem-mesh`](crates/tpt-fem-mesh) | Mesh data model, DOF numbering, Gmsh `.msh` v4.1 import (via `mshio`), region selectors. | `mshio` |
-| [`tpt-fem-sparse`](crates/tpt-fem-sparse) | FEM-specific COO/CSR assembly adapter with a `faer`-backed sparse LU solve. | `faer` |
+| [`tpt-fem-sparse`](crates/tpt-fem-sparse) | FEM-specific COO/CSR assembly adapter with an in-house dense LU solve (optional `russell` sparse-direct backend for large problems). | `tpt-math-linalg-dense` |
 | [`tpt-fem-assembly`](crates/tpt-fem-assembly) | Element-to-global scatter, Dirichlet/Neumann/Robin boundary conditions, reduced-system extraction. | `tpt-fem-{sparse,element,mesh}` |
 | [`tpt-fem-thermal`](crates/tpt-fem-thermal) | Heat-conduction / Poisson elements (`-∇·(k∇u) = f`). | `tpt-fem-assembly` |
 | [`tpt-fem-io-vtk`](crates/tpt-fem-io-vtk) | ParaView `.vtk` / `.vtu` export (via `vtkio`). | `tpt-fem-mesh`, `vtkio` |
@@ -127,10 +127,10 @@ A `Justfile` wraps these (and the `cargo run` examples) for convenience.
 
 ## Status
 
-Phases 1–4 (core, assembly, first physics, structural/nonlinear, ecosystem-gap
-crates) and the hardening/completeness passes (Phase 5 error ergonomics &
-validation, Phase 6 physics completeness) are implemented. The CLI, MMS
-convergence suite, fuzz targets, and Python bindings (Phase 7–8) are in progress.
+All phases are implemented: Phases 1–4 (core, assembly, first physics,
+structural/nonlinear, ecosystem-gap crates), Phase 5 error ergonomics &
+validation, Phase 6 physics completeness, and Phase 7–8 (CLI, MMS convergence
+suite, fuzz targets, Python bindings).
 
 ## License
 

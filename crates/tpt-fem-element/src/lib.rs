@@ -17,8 +17,9 @@
 //! physical node coordinates and the local gradients, and maps local gradients
 //! to their physical-space counterparts.
 //!
-//! Quadratic (`P2`) elements are a tracked follow-up and are intentionally not
-//! implemented in this pass.
+//! Quadratic (`P2`) elements are provided as a follow-up: `Tri6`, `Quad8`
+//! (serendipity), `Quad9` (biquadratic Lagrange), `Tet10`, `Hex20`
+//! (serendipity) and `Hex27` (triquadratic Lagrange).
 #![allow(clippy::needless_range_loop)]
 
 use tpt_fem_quadrature::{
@@ -62,6 +63,29 @@ pub struct Tet4;
 /// Linear 8-node hexahedron on `[-1, 1]³`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Hex8;
+
+/// Quadratic 6-node triangle (P2 Lagrange) on the same reference domain as
+/// `Tri3`: vertices `(0,0)`, `(1,0)`, `(0,1)` plus edge midpoints
+/// `(0.5,0)`, `(0,0.5)`, `(0.5,0.5)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tri6;
+/// Quadratic 9-node quadrilateral (biquadratic Lagrange) on `[-1, 1]²`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quad9;
+/// Quadratic 8-node serendipity quadrilateral on `[-1, 1]²` (no centre node).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quad8;
+/// Quadratic 10-node tetrahedron (P2 Lagrange) on the same reference domain as
+/// `Tet4`: the four vertices plus the six edge midpoints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tet10;
+/// Quadratic 27-node hexahedron (triquadratic Lagrange) on `[-1, 1]³`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hex27;
+/// Quadratic 20-node serendipity hexahedron on `[-1, 1]³` (corners + edge
+/// midpoints; no face or centre nodes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hex20;
 
 impl ReferenceElement for Line2 {
     const DIM: usize = 1;
@@ -193,6 +217,374 @@ impl ReferenceElement for Hex8 {
                 ]
             })
             .collect()
+    }
+}
+
+/// 1-D quadratic Lagrange basis value at node position `at` ∈ {-1, 0, 1},
+/// evaluated at `x`.
+fn lag2(x: f64, at: f64) -> f64 {
+    if at == -1.0 {
+        x * (x - 1.0) / 2.0
+    } else if at == 0.0 {
+        1.0 - x * x
+    } else {
+        debug_assert_eq!(at, 1.0);
+        x * (x + 1.0) / 2.0
+    }
+}
+
+/// Derivative of [`lag2`] with respect to `x`.
+fn dlag2(x: f64, at: f64) -> f64 {
+    if at == -1.0 {
+        (2.0 * x - 1.0) / 2.0
+    } else if at == 0.0 {
+        -2.0 * x
+    } else {
+        debug_assert_eq!(at, 1.0);
+        (2.0 * x + 1.0) / 2.0
+    }
+}
+
+/// Reference node list for `Quad9`/`Hex27`: the tensor product of
+/// `{-1, 0, 1}` over the element's spatial dimension.
+fn tensor_nodes(dim: usize) -> Vec<Vec<f64>> {
+    let levels = [-1.0_f64, 0.0, 1.0];
+    let mut v = Vec::new();
+    match dim {
+        2 => {
+            for &a in &levels {
+                for &b in &levels {
+                    v.push(vec![a, b]);
+                }
+            }
+        }
+        3 => {
+            for &a in &levels {
+                for &b in &levels {
+                    for &c in &levels {
+                        v.push(vec![a, b, c]);
+                    }
+                }
+            }
+        }
+        _ => unreachable!("tensor_nodes: unsupported dimension {dim}"),
+    }
+    v
+}
+
+impl ReferenceElement for Tri6 {
+    const DIM: usize = 2;
+    const NUM_NODES: usize = 6;
+    fn nodes() -> Vec<Vec<f64>> {
+        vec![
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+            vec![0.5, 0.0],
+            vec![0.5, 0.5],
+            vec![0.0, 0.5],
+        ]
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        // Barycentric (area) coordinates on the right-triangle reference domain.
+        let l1 = 1.0 - xi[0] - xi[1];
+        let l2 = xi[0];
+        let l3 = xi[1];
+        vec![
+            l1 * (2.0 * l1 - 1.0), // vertex 1
+            l2 * (2.0 * l2 - 1.0), // vertex 2
+            l3 * (2.0 * l3 - 1.0), // vertex 3
+            4.0 * l1 * l2,         // mid 1-2
+            4.0 * l2 * l3,         // mid 2-3
+            4.0 * l1 * l3,         // mid 1-3
+        ]
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let l1 = 1.0 - xi[0] - xi[1];
+        let l2 = xi[0];
+        let l3 = xi[1];
+        // dN/dL_i for each node: (dL1, dL2, dL3).
+        let dl = [
+            [4.0 * l1 - 1.0, 0.0, 0.0],
+            [0.0, 4.0 * l2 - 1.0, 0.0],
+            [0.0, 0.0, 4.0 * l3 - 1.0],
+            [4.0 * l2, 4.0 * l1, 0.0],
+            [0.0, 4.0 * l3, 4.0 * l2],
+            [4.0 * l3, 0.0, 4.0 * l1],
+        ];
+        dl.iter()
+            .map(|d| {
+                // dL1/dx = -1, dL2/dx = 1, dL3/dx = 0; dN/dx = -dL1 + dL2.
+                // dL1/dy = -1, dL2/dy = 0, dL3/dy = 1; dN/dy = -dL1 + dL3.
+                vec![-d[0] + d[1], -d[0] + d[2]]
+            })
+            .collect()
+    }
+}
+
+impl ReferenceElement for Quad9 {
+    const DIM: usize = 2;
+    const NUM_NODES: usize = 9;
+    fn nodes() -> Vec<Vec<f64>> {
+        tensor_nodes(2)
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        let ns = Self::nodes();
+        ns.iter()
+            .map(|n| lag2(xi[0], n[0]) * lag2(xi[1], n[1]))
+            .collect()
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let ns = Self::nodes();
+        ns.iter()
+            .map(|n| {
+                vec![
+                    dlag2(xi[0], n[0]) * lag2(xi[1], n[1]),
+                    lag2(xi[0], n[0]) * dlag2(xi[1], n[1]),
+                ]
+            })
+            .collect()
+    }
+}
+
+impl ReferenceElement for Quad8 {
+    const DIM: usize = 2;
+    const NUM_NODES: usize = 8;
+    fn nodes() -> Vec<Vec<f64>> {
+        vec![
+            vec![-1.0, -1.0],
+            vec![1.0, -1.0],
+            vec![1.0, 1.0],
+            vec![-1.0, 1.0],
+            vec![0.0, -1.0],
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+            vec![-1.0, 0.0],
+        ]
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        let (x, y) = (xi[0], xi[1]);
+        // Corners 0-3: 1/4 (1+a x)(1+b y)(a x + b y - 1).
+        // Mids 4-7: bottom/right/top/left serendipity bubbles.
+        let corner = |a: f64, b: f64| -> f64 {
+            0.25 * (1.0 + a * x) * (1.0 + b * y) * (a * x + b * y - 1.0)
+        };
+        vec![
+            corner(-1.0, -1.0),
+            corner(1.0, -1.0),
+            corner(1.0, 1.0),
+            corner(-1.0, 1.0),
+            0.5 * (1.0 - x * x) * (1.0 - y), // bottom mid
+            0.5 * (1.0 - y * y) * (1.0 + x), // right mid
+            0.5 * (1.0 - x * x) * (1.0 + y), // top mid
+            0.5 * (1.0 - y * y) * (1.0 - x), // left mid
+        ]
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let (x, y) = (xi[0], xi[1]);
+        let corner = |a: f64, b: f64| -> [f64; 2] {
+            let aa = 1.0 + a * x;
+            let bb = 1.0 + b * y;
+            let cc = a * x + b * y - 1.0;
+            // dN/dx = a/4 * bb * (cc + aa); dN/dy = b/4 * aa * (cc + bb).
+            [0.25 * a * bb * (cc + aa), 0.25 * b * aa * (cc + bb)]
+        };
+        vec![
+            corner(-1.0, -1.0).to_vec(),
+            corner(1.0, -1.0).to_vec(),
+            corner(1.0, 1.0).to_vec(),
+            corner(-1.0, 1.0).to_vec(),
+            vec![-x * (1.0 - y), -0.5 * (1.0 - x * x)], // bottom mid
+            vec![0.5 * (1.0 - y * y), -y * (1.0 + x)],  // right mid
+            vec![-x * (1.0 + y), 0.5 * (1.0 - x * x)],  // top mid
+            vec![-0.5 * (1.0 - y * y), -y * (1.0 - x)], // left mid
+        ]
+    }
+}
+
+impl ReferenceElement for Tet10 {
+    const DIM: usize = 3;
+    const NUM_NODES: usize = 10;
+    fn nodes() -> Vec<Vec<f64>> {
+        vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+            vec![0.5, 0.0, 0.0], // mid 1-2
+            vec![0.5, 0.5, 0.0], // mid 2-3
+            vec![0.0, 0.5, 0.0], // mid 1-3
+            vec![0.0, 0.0, 0.5], // mid 1-4
+            vec![0.5, 0.0, 0.5], // mid 2-4
+            vec![0.0, 0.5, 0.5], // mid 3-4
+        ]
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        let l1 = 1.0 - xi[0] - xi[1] - xi[2];
+        let l2 = xi[0];
+        let l3 = xi[1];
+        let l4 = xi[2];
+        vec![
+            l1 * (2.0 * l1 - 1.0), // vertex 1
+            l2 * (2.0 * l2 - 1.0), // vertex 2
+            l3 * (2.0 * l3 - 1.0), // vertex 3
+            l4 * (2.0 * l4 - 1.0), // vertex 4
+            4.0 * l1 * l2,         // mid 1-2
+            4.0 * l2 * l3,         // mid 2-3
+            4.0 * l1 * l3,         // mid 1-3
+            4.0 * l1 * l4,         // mid 1-4
+            4.0 * l2 * l4,         // mid 2-4
+            4.0 * l3 * l4,         // mid 3-4
+        ]
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let l1 = 1.0 - xi[0] - xi[1] - xi[2];
+        let l2 = xi[0];
+        let l3 = xi[1];
+        let l4 = xi[2];
+        let dl = [
+            [4.0 * l1 - 1.0, 0.0, 0.0, 0.0],
+            [0.0, 4.0 * l2 - 1.0, 0.0, 0.0],
+            [0.0, 0.0, 4.0 * l3 - 1.0, 0.0],
+            [0.0, 0.0, 0.0, 4.0 * l4 - 1.0],
+            [4.0 * l2, 4.0 * l1, 0.0, 0.0],
+            [0.0, 4.0 * l3, 4.0 * l2, 0.0],
+            [4.0 * l3, 0.0, 4.0 * l1, 0.0],
+            [4.0 * l4, 0.0, 0.0, 4.0 * l1],
+            [0.0, 4.0 * l4, 0.0, 4.0 * l2],
+            [0.0, 0.0, 4.0 * l4, 4.0 * l3],
+        ];
+        dl.iter()
+            .map(|d| {
+                // dL1 = (-1,-1,-1), dL2 = (1,0,0), dL3 = (0,1,0), dL4 = (0,0,1).
+                // dN/dx = -dL1 + dL2; dN/dy = -dL1 + dL3; dN/dz = -dL1 + dL4.
+                vec![-d[0] + d[1], -d[0] + d[2], -d[0] + d[3]]
+            })
+            .collect()
+    }
+}
+
+impl ReferenceElement for Hex27 {
+    const DIM: usize = 3;
+    const NUM_NODES: usize = 27;
+    fn nodes() -> Vec<Vec<f64>> {
+        tensor_nodes(3)
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        let ns = Self::nodes();
+        ns.iter()
+            .map(|n| lag2(xi[0], n[0]) * lag2(xi[1], n[1]) * lag2(xi[2], n[2]))
+            .collect()
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let ns = Self::nodes();
+        ns.iter()
+            .map(|n| {
+                vec![
+                    dlag2(xi[0], n[0]) * lag2(xi[1], n[1]) * lag2(xi[2], n[2]),
+                    lag2(xi[0], n[0]) * dlag2(xi[1], n[1]) * lag2(xi[2], n[2]),
+                    lag2(xi[0], n[0]) * lag2(xi[1], n[1]) * dlag2(xi[2], n[2]),
+                ]
+            })
+            .collect()
+    }
+}
+
+impl ReferenceElement for Hex20 {
+    const DIM: usize = 3;
+    const NUM_NODES: usize = 20;
+    fn nodes() -> Vec<Vec<f64>> {
+        vec![
+            vec![-1.0, -1.0, -1.0],
+            vec![1.0, -1.0, -1.0],
+            vec![1.0, 1.0, -1.0],
+            vec![-1.0, 1.0, -1.0],
+            vec![-1.0, -1.0, 1.0],
+            vec![1.0, -1.0, 1.0],
+            vec![1.0, 1.0, 1.0],
+            vec![-1.0, 1.0, 1.0],
+            vec![0.0, -1.0, -1.0],
+            vec![1.0, 0.0, -1.0],
+            vec![0.0, 1.0, -1.0],
+            vec![-1.0, 0.0, -1.0],
+            vec![0.0, -1.0, 1.0],
+            vec![1.0, 0.0, 1.0],
+            vec![0.0, 1.0, 1.0],
+            vec![-1.0, 0.0, 1.0],
+            vec![-1.0, -1.0, 0.0],
+            vec![1.0, -1.0, 0.0],
+            vec![1.0, 1.0, 0.0],
+            vec![-1.0, 1.0, 0.0],
+        ]
+    }
+    fn shape(xi: &[f64]) -> Vec<f64> {
+        let (x, y, z) = (xi[0], xi[1], xi[2]);
+        Self::nodes()
+            .iter()
+            .map(|n| hex20_shape_at(n, x, y, z))
+            .collect()
+    }
+    fn grad(xi: &[f64]) -> Vec<Vec<f64>> {
+        let (x, y, z) = (xi[0], xi[1], xi[2]);
+        Self::nodes()
+            .iter()
+            .map(|n| hex20_grad_at(n, x, y, z))
+            .collect()
+    }
+}
+
+/// `Hex20` shape-function value for a node with reference coords `n` at
+/// `(x, y, z)`.
+fn hex20_shape_at(n: &[f64], x: f64, y: f64, z: f64) -> f64 {
+    let zeros = n.iter().filter(|v| **v == 0.0).count();
+    if zeros == 0 {
+        // Corner: 1/8 (1+a x)(1+b y)(1+c z)(a x + b y + c z - 2).
+        let (a, b, c) = (n[0], n[1], n[2]);
+        (1.0 + a * x) * (1.0 + b * y) * (1.0 + c * z) * (a * x + b * y + c * z - 2.0) / 8.0
+    } else {
+        // Edge midpoint: the single zero coordinate selects the edge axis.
+        match n.iter().position(|v| *v == 0.0).unwrap() {
+            0 => 0.25 * (1.0 - x * x) * (1.0 + n[1] * y) * (1.0 + n[2] * z), // ξ = 0
+            1 => 0.25 * (1.0 + n[0] * x) * (1.0 - y * y) * (1.0 + n[2] * z), // η = 0
+            _ => 0.25 * (1.0 + n[0] * x) * (1.0 + n[1] * y) * (1.0 - z * z), // ζ = 0
+        }
+    }
+}
+
+/// `Hex20` shape-function gradient for a node with reference coords `n` at
+/// `(x, y, z)`.
+fn hex20_grad_at(n: &[f64], x: f64, y: f64, z: f64) -> Vec<f64> {
+    let zeros = n.iter().filter(|v| **v == 0.0).count();
+    if zeros == 0 {
+        let (a, b, c) = (n[0], n[1], n[2]);
+        let aa = 1.0 + a * x;
+        let bb = 1.0 + b * y;
+        let cc = 1.0 + c * z;
+        let dd = a * x + b * y + c * z - 2.0;
+        // dN/dx = a/8 * bb * cc * (dd + aa); etc.
+        vec![
+            0.125 * a * bb * cc * (dd + aa),
+            0.125 * b * aa * cc * (dd + bb),
+            0.125 * c * aa * bb * (dd + cc),
+        ]
+    } else {
+        match n.iter().position(|v| *v == 0.0).unwrap() {
+            0 => vec![
+                -0.5 * x * (1.0 + n[1] * y) * (1.0 + n[2] * z),
+                0.25 * (1.0 - x * x) * n[1] * (1.0 + n[2] * z),
+                0.25 * (1.0 - x * x) * (1.0 + n[1] * y) * n[2],
+            ],
+            1 => vec![
+                0.25 * n[0] * (1.0 - y * y) * (1.0 + n[2] * z),
+                -0.5 * y * (1.0 + n[0] * x) * (1.0 + n[2] * z),
+                0.25 * (1.0 + n[0] * x) * (1.0 - y * y) * n[2],
+            ],
+            _ => vec![
+                0.25 * n[0] * (1.0 + n[1] * y) * (1.0 - z * z),
+                0.25 * (1.0 + n[0] * x) * n[1] * (1.0 - z * z),
+                -0.5 * z * (1.0 + n[0] * x) * (1.0 + n[1] * y),
+            ],
+        }
     }
 }
 
@@ -460,5 +852,112 @@ mod tests {
             &[2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0],
             1e-12
         ));
+    }
+}
+
+#[cfg(test)]
+mod p2_tests {
+    use super::*;
+
+    fn close(a: &[f64], b: &[f64], tol: f64) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < tol)
+    }
+
+    /// A Lagrange or serendipity element reproduces affine maps exactly, so
+    /// mapping the reference nodes to themselves yields the identity Jacobian
+    /// (determinant 1) at every point in the reference domain.
+    fn check_jacobian_identity<T: ReferenceElement>() {
+        let nodes = T::nodes();
+        let pt = vec![0.2_f64; T::DIM]
+            .iter()
+            .map(|v| v * 0.5 + 0.1)
+            .collect::<Vec<_>>();
+        let grad = T::grad(&pt);
+        let m = Map::from_nodes_and_grad(&nodes, &grad);
+        assert!(
+            (m.determinant - 1.0).abs() < 1e-9,
+            "det={} ({} nodes)",
+            m.determinant,
+            T::NUM_NODES
+        );
+        let id = (0..T::DIM)
+            .flat_map(|r| (0..T::DIM).map(move |c| if r == c { 1.0 } else { 0.0 }))
+            .collect::<Vec<_>>();
+        assert!(
+            close(&m.jacobian, &id, 1e-9),
+            "jac={:?} ({} nodes)",
+            m.jacobian,
+            T::NUM_NODES
+        );
+    }
+
+    fn check_partition_and_kronecker<T: ReferenceElement>() {
+        let samples: Vec<Vec<f64>> = match T::DIM {
+            2 => vec![
+                vec![0.25, 0.15],
+                vec![0.5, 0.1],
+                vec![-0.2, 0.4],
+                vec![0.0, 0.0],
+            ],
+            3 => vec![
+                vec![0.2, 0.1, 0.15],
+                vec![0.1, -0.2, 0.3],
+                vec![0.0, 0.0, 0.0],
+            ],
+            _ => vec![vec![0.0; T::DIM]],
+        };
+        for p in &samples {
+            let s = T::shape(p);
+            let sum = s.iter().sum::<f64>();
+            assert!((sum - 1.0).abs() < 1e-9, "partition sum={sum}");
+        }
+        let nodes = T::nodes();
+        for (j, n) in nodes.iter().enumerate() {
+            let s = T::shape(n);
+            for (i, v) in s.iter().enumerate() {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (v - expected).abs() < 1e-9,
+                    "{} node {j} shape {i} = {v}",
+                    T::NUM_NODES
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tri6_props() {
+        check_partition_and_kronecker::<Tri6>();
+        check_jacobian_identity::<Tri6>();
+    }
+
+    #[test]
+    fn quad9_props() {
+        check_partition_and_kronecker::<Quad9>();
+        check_jacobian_identity::<Quad9>();
+    }
+
+    #[test]
+    fn quad8_props() {
+        check_partition_and_kronecker::<Quad8>();
+        check_jacobian_identity::<Quad8>();
+    }
+
+    #[test]
+    fn tet10_props() {
+        check_partition_and_kronecker::<Tet10>();
+        check_jacobian_identity::<Tet10>();
+    }
+
+    #[test]
+    fn hex27_props() {
+        check_partition_and_kronecker::<Hex27>();
+        check_jacobian_identity::<Hex27>();
+    }
+
+    #[test]
+    fn hex20_props() {
+        check_partition_and_kronecker::<Hex20>();
+        check_jacobian_identity::<Hex20>();
     }
 }

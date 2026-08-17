@@ -15,7 +15,9 @@
 //! Scalar fields (one degree of freedom per node) are assumed.
 
 use tpt_fem_assembly::{apply_neumann, apply_robin, assemble, solve_with_dirichlet};
-use tpt_fem_element::{Hex8, Line2, Map, Quad4, ReferenceElement, Tet4, Tri3};
+use tpt_fem_element::{
+    Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
+};
 use tpt_fem_mesh::{CellType, Mesh};
 use tpt_fem_quadrature::{
     gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
@@ -58,6 +60,34 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
                 r.weights,
             )
         }
+        CellType::Tri6 => {
+            let r = triangle(TriangleRule::HammerStroud);
+            (
+                r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Quad8 | CellType::Quad9 => {
+            let r = tensor_square(&gauss_legendre(order + 1));
+            (
+                r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Tet10 => {
+            let r = tetrahedron(TetrahedronRule::Keast4);
+            (
+                r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
+                r.weights,
+            )
+        }
+        CellType::Hex20 | CellType::Hex27 => {
+            let r = tensor_cube(&gauss_legendre(order + 1));
+            (
+                r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
+                r.weights,
+            )
+        }
     }
 }
 
@@ -68,6 +98,12 @@ fn ref_shape(cell: CellType, xi: &[f64]) -> Vec<f64> {
         CellType::Quad => Quad4::shape(xi),
         CellType::Tet => Tet4::shape(xi),
         CellType::Hex => Hex8::shape(xi),
+        CellType::Tri6 => Tri6::shape(xi),
+        CellType::Quad8 => Quad8::shape(xi),
+        CellType::Quad9 => Quad9::shape(xi),
+        CellType::Tet10 => Tet10::shape(xi),
+        CellType::Hex20 => Hex20::shape(xi),
+        CellType::Hex27 => Hex27::shape(xi),
     }
 }
 
@@ -78,6 +114,12 @@ fn ref_grad(cell: CellType, xi: &[f64]) -> Vec<Vec<f64>> {
         CellType::Quad => Quad4::grad(xi),
         CellType::Tet => Tet4::grad(xi),
         CellType::Hex => Hex8::grad(xi),
+        CellType::Tri6 => Tri6::grad(xi),
+        CellType::Quad8 => Quad8::grad(xi),
+        CellType::Quad9 => Quad9::grad(xi),
+        CellType::Tet10 => Tet10::grad(xi),
+        CellType::Hex20 => Hex20::grad(xi),
+        CellType::Hex27 => Hex27::grad(xi),
     }
 }
 
@@ -233,6 +275,37 @@ mod tests {
             u[mid],
             exact
         );
+    }
+
+    #[test]
+    fn poisson_p2_tri6_linear_is_exact() {
+        // Single Tri6 element on the reference triangle. `u = x` is linear, so
+        // the P2 interpolant is exact; with Dirichlet on the three vertices the
+        // free mid-nodes must recover the linear field (verifies the full
+        // P2 assembly + solve path end to end).
+        use tpt_fem_element::Tri6;
+        let phys = Tri6::nodes();
+        let mut b = MeshBuilder::new();
+        let mut ids = Vec::new();
+        for p in &phys {
+            ids.push(b.add_node(vec![p[0], p[1]]));
+        }
+        b.add_element(CellType::Tri6, ids.clone());
+        let mesh = b.build();
+        let u = solve_poisson(
+            &mesh,
+            1.0,
+            4,
+            |x| x[0],
+            &[(ids[0], 0.0), (ids[1], 1.0), (ids[2], 0.0)],
+            None,
+            None,
+        )
+        .unwrap();
+        // Mid nodes: (0.5,0) -> 0.5, (0.5,0.5) -> 0.5, (0,0.5) -> 0.0.
+        assert!((u[ids[3]] - 0.5).abs() < 1e-9, "got {}", u[ids[3]]);
+        assert!((u[ids[4]] - 0.5).abs() < 1e-9, "got {}", u[ids[4]]);
+        assert!((u[ids[5]] - 0.0).abs() < 1e-9, "got {}", u[ids[5]]);
     }
 
     #[test]

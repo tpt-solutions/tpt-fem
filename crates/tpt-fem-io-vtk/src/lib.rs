@@ -98,6 +98,12 @@ fn vtk_cell_type(cell: CellType) -> vtkio::model::CellType {
         CellType::Quad => vtkio::model::CellType::Quad,
         CellType::Tet => vtkio::model::CellType::Tetra,
         CellType::Hex => vtkio::model::CellType::Hexahedron,
+        CellType::Tri6 => vtkio::model::CellType::QuadraticTriangle,
+        CellType::Quad8 => vtkio::model::CellType::QuadraticQuad,
+        CellType::Quad9 => vtkio::model::CellType::BiquadraticQuad,
+        CellType::Tet10 => vtkio::model::CellType::QuadraticTetra,
+        CellType::Hex20 => vtkio::model::CellType::QuadraticHexahedron,
+        CellType::Hex27 => vtkio::model::CellType::TriquadraticHexahedron,
     }
 }
 

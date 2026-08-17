@@ -466,7 +466,17 @@ pub fn arc_length_continuation(
             // Predictor: tangent direction for a unit load increment. A singular
             // tangent here means the step started on a fold; cut back.
             let x1 = match dense_solve(&kt0_dense, std::slice::from_ref(&pload)) {
-                Ok(s) => s.into_iter().next().unwrap(),
+                Ok(mut s) => match s.pop() {
+                    Some(x) => x,
+                    None => {
+                        cutbacks += 1;
+                        if cutbacks > opts.max_cutbacks || delta_s * 0.5 < opts.min_arc_length {
+                            return Err(ArcLengthError::MaxCutbacks);
+                        }
+                        delta_s *= 0.5;
+                        continue 'step;
+                    }
+                },
                 Err(_) => {
                     cutbacks += 1;
                     if cutbacks > opts.max_cutbacks || delta_s * 0.5 < opts.min_arc_length {

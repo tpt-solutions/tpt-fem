@@ -9,12 +9,10 @@
 //! * [`Mesh::from_msh_bytes`] — import of Gmsh `.msh` version 4.1 ASCII files
 //!   via the [`mshio`] crate.
 //!
-//! Only the five linear element types `Line2`, `Tri3`, `Quad4`, `Tet4`, and
-//! `Hex8` are imported; other Gmsh element types produce
-//! [`MeshError::UnsupportedElementType`]. Higher-order element types are a
-//! tracked follow-up.
-//!
-//! # Example
+//! The five linear cell types `Line2`, `Tri3`, `Quad4`, `Tet4`, and `Hex8` are
+//! supported natively, along with the quadratic (`P2`) types `Tri6`, `Quad8`,
+//! `Quad9`, `Tet10`, `Hex20`, and `Hex27`. Other Gmsh element types produce
+//! [`MeshError::UnsupportedElementType`].
 //!
 //! ```
 //! use tpt_fem_mesh::{MeshBuilder, CellType};
@@ -36,7 +34,7 @@ pub type NodeId = usize;
 /// An element identifier (index into [`Mesh::elements`]).
 pub type ElementId = usize;
 
-/// The supported linear cell types.
+/// The supported cell types, including quadratic (`P2`) Lagrange families.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellType {
     /// 2-node line.
@@ -49,6 +47,18 @@ pub enum CellType {
     Tet,
     /// 8-node hexahedron.
     Hex,
+    /// 6-node quadratic triangle.
+    Tri6,
+    /// 8-node serendipity quadratic quadrilateral.
+    Quad8,
+    /// 9-node biquadratic quadrilateral.
+    Quad9,
+    /// 10-node quadratic tetrahedron.
+    Tet10,
+    /// 20-node serendipity quadratic hexahedron.
+    Hex20,
+    /// 27-node triquadratic hexahedron.
+    Hex27,
 }
 
 impl CellType {
@@ -60,7 +70,26 @@ impl CellType {
             CellType::Quad => 4,
             CellType::Tet => 4,
             CellType::Hex => 8,
+            CellType::Tri6 => 6,
+            CellType::Quad8 => 8,
+            CellType::Quad9 => 9,
+            CellType::Tet10 => 10,
+            CellType::Hex20 => 20,
+            CellType::Hex27 => 27,
         }
+    }
+
+    /// Whether this cell type is a quadratic (`P2`) element.
+    pub fn is_p2(self) -> bool {
+        matches!(
+            self,
+            CellType::Tri6
+                | CellType::Quad8
+                | CellType::Quad9
+                | CellType::Tet10
+                | CellType::Hex20
+                | CellType::Hex27
+        )
     }
 
     /// Reference-element name, used in diagnostics.
@@ -71,6 +100,12 @@ impl CellType {
             CellType::Quad => "Quad4",
             CellType::Tet => "Tet4",
             CellType::Hex => "Hex8",
+            CellType::Tri6 => "Tri6",
+            CellType::Quad8 => "Quad8",
+            CellType::Quad9 => "Quad9",
+            CellType::Tet10 => "Tet10",
+            CellType::Hex20 => "Hex20",
+            CellType::Hex27 => "Hex27",
         }
     }
 }
@@ -304,6 +339,12 @@ impl Mesh {
                 mshio::mshfile::ElementType::Qua4 => CellType::Quad,
                 mshio::mshfile::ElementType::Tet4 => CellType::Tet,
                 mshio::mshfile::ElementType::Hex8 => CellType::Hex,
+                mshio::mshfile::ElementType::Tri6 => CellType::Tri6,
+                mshio::mshfile::ElementType::Qua8 => CellType::Quad8,
+                mshio::mshfile::ElementType::Qua9 => CellType::Quad9,
+                mshio::mshfile::ElementType::Tet10 => CellType::Tet10,
+                mshio::mshfile::ElementType::Hex20 => CellType::Hex20,
+                mshio::mshfile::ElementType::Hex27 => CellType::Hex27,
                 other => return Err(MeshError::UnsupportedElementType(other as u8)),
             };
             let expected = cell.node_count();
@@ -314,23 +355,32 @@ impl Mesh {
                 if element.nodes.len() != expected {
                     return Err(MeshError::UnsupportedElementType(block.element_type as u8));
                 }
-                let node_ids: Vec<NodeId> = element
-                    .nodes
-                    .iter()
-                    .map(|t| {
-                        tag_to_id
-                            .get(t)
-                            .copied()
-                            .ok_or(MeshError::DanglingNodeTag(*t))
-                    })
-                    .collect::<Result<_, _>>()?;
-                let id = elements.len();
-                elements.push(Element {
-                    id,
-                    cell_type: cell,
-                    nodes: node_ids,
-                    region,
-                });
+            let node_ids: Vec<NodeId> = element
+                .nodes
+                .iter()
+                .map(|t| {
+                    tag_to_id
+                        .get(t)
+                        .copied()
+                        .ok_or(MeshError::DanglingNodeTag(*t))
+                })
+                .collect::<Result<_, _>>()?;
+            // Quadratic (P2) Gmsh elements store their nodes in a different
+            // order than `tpt-fem-element`'s reference element (see
+            // `p2_gmsh_reference`); reorder so our connectivity matches the
+            // reference-element node indexing the physics crates expect.
+            let node_ids = if cell.is_p2() {
+                reorder_p2(cell, &node_ids)
+            } else {
+                node_ids
+            };
+            let id = elements.len();
+            elements.push(Element {
+                id,
+                cell_type: cell,
+                nodes: node_ids,
+                region,
+            });
             }
         }
 
@@ -512,6 +562,143 @@ impl DofMap {
     pub fn dof(&self, node: NodeId, component: usize) -> usize {
         self.node_dofs[node][component]
     }
+}
+
+/// Gmsh reference-coordinate ordering for a quadratic (`P2`) cell type. The
+/// coordinates are the positions of each node in the Gmsh reference domain,
+/// listed in the *Gmsh* node order (which for `Quad9`/`Hex27` differs from
+/// `tpt-fem-element`'s reference ordering). `tpt-fem-element` always stores
+/// `n`-node coordinates in `{-1, 0, 1}` for quadrilaterals/hexahedra and the
+/// unit-triangle/tetra for simplices, so this table fully determines the
+/// reordering.
+fn p2_gmsh_reference(cell: CellType) -> &'static [&'static [f64]] {
+    match cell {
+        CellType::Tri6 => &[
+            &[0.0, 0.0],
+            &[1.0, 0.0],
+            &[0.0, 1.0],
+            &[0.5, 0.0],
+            &[0.5, 0.5],
+            &[0.0, 0.5],
+        ],
+        CellType::Quad8 => &[
+            &[-1.0, -1.0],
+            &[1.0, -1.0],
+            &[1.0, 1.0],
+            &[-1.0, 1.0],
+            &[0.0, -1.0],
+            &[1.0, 0.0],
+            &[0.0, 1.0],
+            &[-1.0, 0.0],
+        ],
+        CellType::Quad9 => &[
+            &[-1.0, -1.0],
+            &[1.0, -1.0],
+            &[1.0, 1.0],
+            &[-1.0, 1.0],
+            &[0.0, -1.0],
+            &[1.0, 0.0],
+            &[0.0, 1.0],
+            &[-1.0, 0.0],
+            &[0.0, 0.0],
+        ],
+        CellType::Tet10 => &[
+            &[0.0, 0.0, 0.0],
+            &[1.0, 0.0, 0.0],
+            &[0.0, 1.0, 0.0],
+            &[0.0, 0.0, 1.0],
+            &[0.5, 0.0, 0.0],
+            &[0.5, 0.5, 0.0],
+            &[0.0, 0.5, 0.0],
+            &[0.0, 0.0, 0.5],
+            &[0.5, 0.0, 0.5],
+            &[0.0, 0.5, 0.5],
+        ],
+        CellType::Hex20 => &[
+            &[-1.0, -1.0, -1.0],
+            &[1.0, -1.0, -1.0],
+            &[1.0, 1.0, -1.0],
+            &[-1.0, 1.0, -1.0],
+            &[-1.0, -1.0, 1.0],
+            &[1.0, -1.0, 1.0],
+            &[1.0, 1.0, 1.0],
+            &[-1.0, 1.0, 1.0],
+            &[0.0, -1.0, -1.0],
+            &[1.0, 0.0, -1.0],
+            &[0.0, 1.0, -1.0],
+            &[-1.0, 0.0, -1.0],
+            &[0.0, -1.0, 1.0],
+            &[1.0, 0.0, 1.0],
+            &[0.0, 1.0, 1.0],
+            &[-1.0, 0.0, 1.0],
+            &[-1.0, -1.0, 0.0],
+            &[1.0, -1.0, 0.0],
+            &[1.0, 1.0, 0.0],
+            &[-1.0, 1.0, 0.0],
+        ],
+        CellType::Hex27 => &[
+            &[-1.0, -1.0, -1.0],
+            &[1.0, -1.0, -1.0],
+            &[1.0, 1.0, -1.0],
+            &[-1.0, 1.0, -1.0],
+            &[-1.0, -1.0, 1.0],
+            &[1.0, -1.0, 1.0],
+            &[1.0, 1.0, 1.0],
+            &[-1.0, 1.0, 1.0],
+            &[0.0, -1.0, -1.0],
+            &[1.0, 0.0, -1.0],
+            &[0.0, 1.0, -1.0],
+            &[-1.0, 0.0, -1.0],
+            &[0.0, -1.0, 1.0],
+            &[1.0, 0.0, 1.0],
+            &[0.0, 1.0, 1.0],
+            &[-1.0, 0.0, 1.0],
+            &[-1.0, -1.0, 0.0],
+            &[1.0, -1.0, 0.0],
+            &[1.0, 1.0, 0.0],
+            &[-1.0, 1.0, 0.0],
+            &[0.0, 0.0, -1.0],
+            &[0.0, 0.0, 1.0],
+            &[0.0, -1.0, 0.0],
+            &[0.0, 1.0, 0.0],
+            &[-1.0, 0.0, 0.0],
+            &[1.0, 0.0, 0.0],
+            &[0.0, 0.0, 0.0],
+        ],
+        _ => &[],
+    }
+}
+
+fn coord_eq(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
+}
+
+/// Reorder a Gmsh-ordered P2 connectivity list into `tpt-fem-element`'s
+/// reference-node order. `gmsh_nodes[g]` is the physical node at the Gmsh
+/// reference position `p2_gmsh_reference(cell)[g]`; the returned list places it
+/// at the local index whose reference position (from the element crate) equals
+/// that same `{-1,0,1}` coordinate.
+fn reorder_p2(cell: CellType, gmsh_nodes: &[NodeId]) -> Vec<NodeId> {
+    use tpt_fem_element::ReferenceElement;
+    let our_ref: Vec<Vec<f64>> = match cell {
+        CellType::Tri6 => tpt_fem_element::Tri6::nodes(),
+        CellType::Quad8 => tpt_fem_element::Quad8::nodes(),
+        CellType::Quad9 => tpt_fem_element::Quad9::nodes(),
+        CellType::Tet10 => tpt_fem_element::Tet10::nodes(),
+        CellType::Hex20 => tpt_fem_element::Hex20::nodes(),
+        CellType::Hex27 => tpt_fem_element::Hex27::nodes(),
+        _ => unreachable!("reorder_p2 called for a non-P2 cell"),
+    };
+    let gmsh_ref = p2_gmsh_reference(cell);
+    let mut out = vec![0usize; our_ref.len()];
+    for (oi, rc) in our_ref.iter().enumerate() {
+        let gi = gmsh_ref
+            .iter()
+            .position(|g| coord_eq(g, rc))
+            .expect("P2 reference coordinate must appear in the Gmsh ordering");
+        out[oi] = gmsh_nodes[gi];
+    }
+    out
 }
 
 #[cfg(test)]
@@ -704,6 +891,116 @@ $EndElements
         b.try_add_element(CellType::Tri, vec![n0, n1, n2]).unwrap();
         let mesh = b.try_build().expect("valid mesh");
         assert_eq!(mesh.element_count(), 1);
+    }
+
+    /// Build a single-element Gmsh v4.1 `.msh` string for a quadratic (`P2`)
+    /// cell type, placing each Gmsh-ordered node at `ref*0.5 + 0.5` so the
+    /// reference `{-1,0,1}` grid maps to the physical `[0,1]` box.
+    fn p2_msh(cell: CellType) -> String {
+        let gmsh_ref = p2_gmsh_reference(cell);
+        let n = gmsh_ref.len();
+        let dim = gmsh_ref[0].len();
+        let mut nodes_section = format!("$Nodes\n1 {n} 1 {n}\n{dim} 1 0 {n}\n");
+        let mut tags = String::new();
+        let mut coords = String::new();
+        for (i, r) in gmsh_ref.iter().enumerate() {
+            tags.push_str(&format!("{} ", i + 1));
+            let phys: Vec<String> = r
+                .iter()
+                .map(|v| format!("{:.6}", v * 0.5 + 0.5))
+                .collect();
+            // Pad to 3 coordinates (z = 0 for 2-D).
+            let mut line = phys;
+            while line.len() < 3 {
+                line.push_str(" 0.000000");
+            }
+            coords.push_str(&line.join(" "));
+            coords.push('\n');
+        }
+        nodes_section.push_str(tags.trim_end());
+        nodes_section.push('\n');
+        nodes_section.push_str(&coords);
+        nodes_section.push_str("$EndNodes\n");
+
+        // Gmsh element type ids for the quadratic families.
+        let gmsh_type: u32 = match cell {
+            CellType::Tri6 => 9,
+            CellType::Quad8 => 16,
+            CellType::Quad9 => 10,
+            CellType::Tet10 => 11,
+            CellType::Hex20 => 17,
+            CellType::Hex27 => 12,
+            _ => unreachable!("p2_msh only used for P2 cells"),
+        };
+        let mut elements_section = format!("$Elements\n1 1 1 1\n{dim} 1 {gmsh_type} 1\n1 ");
+        for i in 0..n {
+            elements_section.push_str(&format!("{} ", i + 1));
+        }
+        elements_section.push_str("\n$EndElements\n");
+
+        format!(
+            "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n{nodes_section}{elements_section}"
+        )
+    }
+
+    #[test]
+    fn imports_tri6_and_reorders_to_reference_order() {
+        let mesh = Mesh::from_msh_bytes(p2_msh(CellType::Tri6).as_bytes()).expect("parse");
+        assert_eq!(mesh.node_count(), 6);
+        assert_eq!(mesh.element_count(), 1);
+        assert_eq!(mesh.elements[0].cell_type, CellType::Tri6);
+        // Our reference ordering equals Gmsh ordering for Tri6, so the imported
+        // connectivity should already be in reference order: node 0 (ref 0,0) is
+        // the physical node at (0,0,0).
+        assert!(mesh.node_coords(mesh.elements[0].nodes[0])[..2]
+            .iter()
+            .all(|v| v.abs() < 1e-9));
+        // Our index 4 is the edge midpoint (0.5, 0.5); physically (0.75, 0.75)
+        // under the ref*0.5+0.5 mapping.
+        let mid = mesh.node_coords(mesh.elements[0].nodes[4]);
+        assert!((mid[0] - 0.75).abs() < 1e-6 && (mid[1] - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn imports_hex27_with_correct_center_node() {
+        // Hex27 is the hard case: Gmsh's node order (8 corners, 12 edges, 6
+        // faces, 1 center) differs from `tpt-fem-element`'s tensor ordering.
+        // After reordering, our index 13 (the reference centre (0,0,0)) must
+        // hold the Gmsh center node (tag 27), which sits at physical (0.5,0.5,0.5).
+        let mesh = Mesh::from_msh_bytes(p2_msh(CellType::Hex27).as_bytes()).expect("parse");
+        assert_eq!(mesh.node_count(), 27);
+        assert_eq!(mesh.element_count(), 1);
+        assert_eq!(mesh.elements[0].cell_type, CellType::Hex27);
+        let centre = mesh.node_coords(mesh.elements[0].nodes[13]);
+        assert!(
+            (centre[0] - 0.5).abs() < 1e-6
+                && (centre[1] - 0.5).abs() < 1e-6
+                && (centre[2] - 0.5).abs() < 1e-6,
+            "centre node was not reordered correctly: {centre:?}"
+        );
+        // A corner (our index 0, ref (-1,-1,-1)) must hold the Gmsh corner at
+        // physical (0,0,0).
+        let corner = mesh.node_coords(mesh.elements[0].nodes[0]);
+        assert!(
+            corner.iter().all(|v| v.abs() < 1e-6),
+            "corner node was not reordered correctly: {corner:?}"
+        );
+    }
+
+    #[test]
+    fn imports_quad9_tet10_quad8_hex20() {
+        for cell in [
+            CellType::Quad9,
+            CellType::Tet10,
+            CellType::Quad8,
+            CellType::Hex20,
+        ] {
+            let mesh = Mesh::from_msh_bytes(p2_msh(cell).as_bytes())
+                .unwrap_or_else(|e| panic!("parse {cell:?}: {e}"));
+            assert_eq!(mesh.element_count(), 1);
+            assert_eq!(mesh.elements[0].cell_type, cell);
+            assert_eq!(mesh.elements[0].nodes.len(), cell.node_count());
+        }
     }
 
     #[test]

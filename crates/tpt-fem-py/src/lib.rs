@@ -7,9 +7,9 @@
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use tpt_fem::{
-    box_mesh as rs_box_mesh, solve_poisson as rs_solve_poisson, write_vtk_with_data, CellType,
-    Mesh as RsMesh, MeshBuilder, PointData,
+use ::tpt_fem::{
+    box_mesh as rs_box_mesh, solve_poisson as rs_solve_poisson, write_vtk_with_data, Mesh as RsMesh,
+    PointData,
 };
 
 #[pyclass]
@@ -36,6 +36,11 @@ impl Mesh {
         Mesh {
             inner: rs_box_mesh(min, max, n),
         }
+    }
+
+    /// Number of nodes in the mesh.
+    fn node_count(&self) -> usize {
+        self.inner.node_count()
     }
 
     /// Coordinates of node `i`.
@@ -89,41 +94,64 @@ fn solve_poisson(
 ) -> PyResult<Vec<f64>> {
     let constant = source.extract::<f64>().ok();
     let callback = if constant.is_none() {
-        Some(source.into_py(py))
+        Some(source.clone().unbind())
     } else {
         None
     };
+    // Captures a Python exception raised by the user callback so it can be
+    // surfaced as a real Python error after the (GIL-released) solve returns,
+    // instead of silently falling back to 0.0.
+    let callback_error: std::rc::Rc<std::cell::RefCell<Option<PyErr>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
 
     // Run the (potentially GIL-unaware) solve with the GIL released; the
     // Python callback re-acquires the GIL per call via `with_gil`.
-    py.allow_threads(move || {
-        let f = move |x: &[f64]| -> f64 {
-            if let Some(c) = constant {
-                return c;
-            }
-            if let Some(cb) = &callback {
-                Python::with_gil(|py| {
-                    let args = (
-                        x.get(0).copied().unwrap_or(0.0),
-                        x.get(1).copied().unwrap_or(0.0),
-                        x.get(2).copied().unwrap_or(0.0),
-                    );
-                    match cb.bind(py).call1(args) {
-                        Ok(v) => v.extract::<f64>().unwrap_or(0.0),
-                        Err(_) => 0.0,
-                    }
-                })
-            } else {
-                0.0
-            }
-        };
-        rs_solve_poisson(&mesh.inner, conductivity, quad_order, f, &bcs, None, None)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    })
+    let result = py.allow_threads({
+        let callback_error = callback_error.clone();
+        move || {
+            let f = move |x: &[f64]| -> f64 {
+                if let Some(c) = constant {
+                    return c;
+                }
+                if let Some(cb) = &callback {
+                    Python::with_gil(|py| {
+                        let args = (
+                            x.get(0).copied().unwrap_or(0.0),
+                            x.get(1).copied().unwrap_or(0.0),
+                            x.get(2).copied().unwrap_or(0.0),
+                        );
+                        match cb.bind(py).call1(args) {
+                            Ok(v) => match v.extract::<f64>() {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    *callback_error.borrow_mut() = Some(e);
+                                    0.0
+                                }
+                            },
+                            Err(e) => {
+                                *callback_error.borrow_mut() = Some(e);
+                                0.0
+                            }
+                        }
+                    })
+                } else {
+                    0.0
+                }
+            };
+            rs_solve_poisson(&mesh.inner, conductivity, quad_order, f, &bcs, None, None)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        }
+    });
+    if result.is_ok() {
+        if let Some(e) = callback_error.borrow_mut().take() {
+            return Err(e);
+        }
+    }
+    result
 }
 
 #[pymodule]
-fn tpt_fem_py(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn tpt_fem(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Mesh>()?;
     m.add_function(wrap_pyfunction!(solve_poisson, py)?)?;
     Ok(())

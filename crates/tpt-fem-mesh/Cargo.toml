@@ -14,6 +14,7 @@ categories = ["data-structures", "science", "mathematics"]
 
 [dependencies]
 mshio = "0.4"
+tpt-fem-element = { workspace = true }
 
 [features]
 default = []

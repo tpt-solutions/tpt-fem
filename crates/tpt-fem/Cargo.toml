@@ -42,6 +42,10 @@ eigen = ["dep:tpt-fem-eigen"]
 io-abaqus = ["dep:tpt-fem-io-abaqus"]
 io-exodus = ["dep:tpt-fem-io-exodus"]
 mesh-gen = ["dep:tpt-fem-mesh-gen"]
+# Optional MUMPS/UMFPACK sparse-direct backend (large-scale solves). Forwards
+# to `tpt-fem-sparse`'s `russell` feature; requires the SuiteSparse/MUMPS
+# toolchain (see `russell_sparse`), so it is never enabled by default.
+russell = ["tpt-fem-sparse/russell"]
 
 [lints]
 workspace = true

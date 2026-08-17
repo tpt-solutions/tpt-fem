@@ -143,7 +143,10 @@ fn encode_nc3(dims: &[NcDim], vars: &[NcVar]) -> Vec<u8> {
     let mut cursor = data_off;
     for v in vars {
         begins.push(cursor as u32);
-        let size = vsize_of(dims, v).expect("encoding trusted dimensions") as usize;
+        // Safe: `dims`/`vars` are fully constructed in this crate from a
+        // validated `Mesh`; the only way `vsize_of` fails is a u32 overflow of
+        // a dimension product, which cannot happen for mesh sizes we encode.
+        let size = vsize_of(dims, v).expect("encoded dimensions are always valid") as usize;
         cursor += size;
         cursor = (cursor + 3) & !3;
     }
@@ -184,8 +187,9 @@ fn build_header(dims: &[NcDim], vars: &[NcVar], begins: &[u32]) -> Vec<u8> {
         }
         h.extend_from_slice(&to_u32(0)); // number of attributes
         h.extend_from_slice(&to_u32(v.dtype));
+        // Safe: see note in `encode_nc3`; `dims`/`vars` are always valid here.
         h.extend_from_slice(&to_u32(
-            vsize_of(dims, v).expect("encoding trusted dimensions"),
+            vsize_of(dims, v).expect("encoded dimensions are always valid"),
         ));
         h.extend_from_slice(&to_u32(begin));
     }
@@ -350,6 +354,12 @@ fn cell_exodus_name(cell: CellType) -> &'static str {
         CellType::Quad => "QUAD4",
         CellType::Tet => "TET4",
         CellType::Hex => "HEX8",
+        CellType::Tri6 => "TRI6",
+        CellType::Quad8 => "QUAD8",
+        CellType::Quad9 => "QUAD9",
+        CellType::Tet10 => "TET10",
+        CellType::Hex20 => "HEX20",
+        CellType::Hex27 => "HEX27",
     }
 }
 
@@ -357,9 +367,15 @@ fn exodus_name_to_cell(name: &str) -> Option<CellType> {
     match name.trim().to_uppercase().as_str() {
         "LINE2" | "L2" | "T2D2" => Some(CellType::Line),
         "TRI3" | "T3" => Some(CellType::Tri),
+        "TRI6" => Some(CellType::Tri6),
         "QUAD4" | "Q4" => Some(CellType::Quad),
+        "QUAD8" => Some(CellType::Quad8),
+        "QUAD9" => Some(CellType::Quad9),
         "TET4" | "T4" => Some(CellType::Tet),
+        "TET10" => Some(CellType::Tet10),
         "HEX8" | "H8" => Some(CellType::Hex),
+        "HEX20" => Some(CellType::Hex20),
+        "HEX27" => Some(CellType::Hex27),
         _ => None,
     }
 }
@@ -696,7 +712,12 @@ fn cell_from_npe(npe: usize) -> CellType {
         2 => CellType::Line,
         3 => CellType::Tri,
         4 => CellType::Quad, // ambiguity resolved by eb_names when present
-        8 => CellType::Hex,
+        6 => CellType::Tri6,
+        8 => CellType::Hex, // ambiguity with Quad8 resolved by eb_names when present
+        9 => CellType::Quad9,
+        10 => CellType::Tet10,
+        20 => CellType::Hex20,
+        27 => CellType::Hex27,
         _ => CellType::Tri,
     }
 }

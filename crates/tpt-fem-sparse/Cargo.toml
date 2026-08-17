@@ -14,9 +14,17 @@ categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 tpt-math-linalg-dense = { git = "https://github.com/tpt-solutions/tpt-math", package = "tpt-math-linalg-dense" }
+# Optional sparse-direct backend. `russell_sparse` wraps MUMPS/UMFPACK and its
+# build downloads + compiles SuiteSparse (Fortran/C toolchain required); it is
+# therefore *not* enabled by default and only compiled where that toolchain
+# exists. See https://github.com/cpmech/russell for install instructions.
+russell_sparse = { version = "2.8", optional = true }
+russell_lab = { version = "2", optional = true }
 
 [features]
 default = []
+# Sparse-direct (MUMPS/UMFPACK) solve backend for large-scale problems.
+russell = ["russell_sparse", "russell_lab"]
 
 [lints]
 workspace = true
