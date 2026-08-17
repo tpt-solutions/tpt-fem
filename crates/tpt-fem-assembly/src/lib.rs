@@ -128,43 +128,124 @@ const HEX_FACES: &[FaceDef] = &[
 // `Hex27` interleave their interior/mid nodes, so their corners are not the
 // first four/eight indices.
 const TRI6_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[1, 2], face: CellType::Line },
-    FaceDef { nodes: &[2, 0], face: CellType::Line },
-    FaceDef { nodes: &[0, 1], face: CellType::Line },
+    FaceDef {
+        nodes: &[1, 2],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[2, 0],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[0, 1],
+        face: CellType::Line,
+    },
 ];
 const QUAD8_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[0, 1], face: CellType::Line },
-    FaceDef { nodes: &[1, 2], face: CellType::Line },
-    FaceDef { nodes: &[2, 3], face: CellType::Line },
-    FaceDef { nodes: &[3, 0], face: CellType::Line },
+    FaceDef {
+        nodes: &[0, 1],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[1, 2],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[2, 3],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[3, 0],
+        face: CellType::Line,
+    },
 ];
 const QUAD9_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[0, 6], face: CellType::Line },
-    FaceDef { nodes: &[6, 8], face: CellType::Line },
-    FaceDef { nodes: &[8, 2], face: CellType::Line },
-    FaceDef { nodes: &[2, 0], face: CellType::Line },
+    FaceDef {
+        nodes: &[0, 6],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[6, 8],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[8, 2],
+        face: CellType::Line,
+    },
+    FaceDef {
+        nodes: &[2, 0],
+        face: CellType::Line,
+    },
 ];
 const TET10_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[1, 2, 3], face: CellType::Tri },
-    FaceDef { nodes: &[0, 2, 3], face: CellType::Tri },
-    FaceDef { nodes: &[0, 1, 3], face: CellType::Tri },
-    FaceDef { nodes: &[0, 1, 2], face: CellType::Tri },
+    FaceDef {
+        nodes: &[1, 2, 3],
+        face: CellType::Tri,
+    },
+    FaceDef {
+        nodes: &[0, 2, 3],
+        face: CellType::Tri,
+    },
+    FaceDef {
+        nodes: &[0, 1, 3],
+        face: CellType::Tri,
+    },
+    FaceDef {
+        nodes: &[0, 1, 2],
+        face: CellType::Tri,
+    },
 ];
 const HEX20_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[0, 1, 2, 3], face: CellType::Quad },
-    FaceDef { nodes: &[4, 5, 6, 7], face: CellType::Quad },
-    FaceDef { nodes: &[0, 1, 5, 4], face: CellType::Quad },
-    FaceDef { nodes: &[3, 2, 6, 7], face: CellType::Quad },
-    FaceDef { nodes: &[0, 4, 7, 3], face: CellType::Quad },
-    FaceDef { nodes: &[1, 5, 6, 2], face: CellType::Quad },
+    FaceDef {
+        nodes: &[0, 1, 2, 3],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[4, 5, 6, 7],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[0, 1, 5, 4],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[3, 2, 6, 7],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[0, 4, 7, 3],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[1, 5, 6, 2],
+        face: CellType::Quad,
+    },
 ];
 const HEX27_FACES: &[FaceDef] = &[
-    FaceDef { nodes: &[0, 18, 24, 6], face: CellType::Quad },
-    FaceDef { nodes: &[2, 20, 26, 8], face: CellType::Quad },
-    FaceDef { nodes: &[0, 18, 20, 2], face: CellType::Quad },
-    FaceDef { nodes: &[6, 24, 26, 8], face: CellType::Quad },
-    FaceDef { nodes: &[0, 2, 8, 6], face: CellType::Quad },
-    FaceDef { nodes: &[18, 20, 26, 24], face: CellType::Quad },
+    FaceDef {
+        nodes: &[0, 18, 24, 6],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[2, 20, 26, 8],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[0, 18, 20, 2],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[6, 24, 26, 8],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[0, 2, 8, 6],
+        face: CellType::Quad,
+    },
+    FaceDef {
+        nodes: &[18, 20, 26, 24],
+        face: CellType::Quad,
+    },
 ];
 
 fn faces_of(cell: CellType) -> &'static [FaceDef] {
@@ -336,6 +417,36 @@ fn surface(tangents: &[Vec<f64>], dim: usize) -> (f64, Vec<f64>) {
         }
         _ => panic!("surface: unsupported face dimension {}", tangents.len()),
     }
+}
+
+/// Fallible variant of [`assemble`].
+///
+/// Identical to [`assemble`], but `elem_matrix` may fail (returning an error of
+/// type `E`), in which case the first failure is propagated rather than
+/// panicking. Use this when the per-element operator can reject an invalid
+/// model/dimension combination.
+pub fn try_assemble<E>(
+    mesh: &Mesh,
+    dofs_per_node: usize,
+    elem_matrix: impl Fn(usize, &Mesh) -> Result<Vec<Vec<f64>>, E>,
+) -> Result<Coo, E> {
+    let mut coo = Coo::new();
+    for (eid, elem) in mesh.elements.iter().enumerate() {
+        let k = elem_matrix(eid, mesh)?;
+        let ndof = k.len();
+        for i in 0..ndof {
+            for j in 0..ndof {
+                let kij = k[i][j];
+                if kij == 0.0 {
+                    continue;
+                }
+                let gi = elem.nodes[i / dofs_per_node] * dofs_per_node + i % dofs_per_node;
+                let gj = elem.nodes[j / dofs_per_node] * dofs_per_node + j % dofs_per_node;
+                coo.push(gi, gj, kij);
+            }
+        }
+    }
+    Ok(coo)
 }
 
 /// Scatter per-element matrices into a global [`Coo`] matrix.

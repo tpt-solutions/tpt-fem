@@ -11,6 +11,8 @@ The binary is named `tpt-fem` and is built from `crates/tpt-fem-cli`.
 Subcommands:
 
 - `solve` — run a steady Poisson/heat-conduction problem from a TOML config.
+- `elasticity` — run a linear-elasticity statics problem from a TOML config.
+- `modal` — extract natural vibration modes from a TOML config.
 - `mesh info` — print summary statistics about a mesh file.
 - `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
 
@@ -34,7 +36,8 @@ cargo install --path crates/tpt-fem-cli
 
 ```text
 # Solve a steady Poisson/heat-conduction problem from a TOML config.
-tpt-fem solve --config problem.toml --out result.vtk
+# `solve` takes a single positional config file (no --config/--out flags).
+tpt-fem solve problem.toml
 
 # Print mesh statistics.
 tpt-fem mesh info mesh.msh

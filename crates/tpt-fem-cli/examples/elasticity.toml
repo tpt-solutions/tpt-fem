@@ -1,0 +1,38 @@
+# Example problem for the `tpt-fem` CLI.
+#
+# Run with:
+#   cargo run -p tpt-fem-cli -- elasticity path/to/elasticity.toml
+#
+# Linear-elasticity statics: K u = f, with `K` the consistent stiffness matrix
+# and a homogeneous Dirichlet (fixed) boundary. Set `problem.type = "modal"` to
+# instead extract natural vibration modes (ω² from the K φ = ω² M φ pencil).
+#
+# `problem.model` selects the constitutive law:
+#   "bar"          — 1-D axial bar (EA)
+#   "plane-stress" — 2-D plane stress
+#   "plane-strain" — 2-D plane strain
+#   "3d"           — 3-D isotropic continuum
+
+[problem]
+type = "elasticity"
+model = "plane-stress"
+
+[mesh]
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+young   = 1.0
+poisson = 0.3
+# `density` is only used by `problem.type = "modal"`.
+
+# Fully fix every DOF of each selected node. Here the whole boundary is clamped
+# (zero displacement), so with no body load the solution is u = 0.
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = "displacement.vtk"

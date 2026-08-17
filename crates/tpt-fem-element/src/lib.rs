@@ -651,7 +651,10 @@ impl Map {
     /// Assemble the isoparametric Jacobian from physical node coordinates and
     /// the corresponding local shape-function gradients.
     pub fn from_nodes_and_grad(physical: &[Vec<f64>], local_grad: &[Vec<f64>]) -> Self {
-        let n = physical[0].len();
+        // The element (reference) dimension is the width of a local gradient, not
+        // the physical coordinate count: a planar 2-D element imported from Gmsh
+        // carries 3-component coordinates, but its Jacobian is the 2×2 planar one.
+        let n = local_grad[0].len();
         let mut jac = vec![0.0; n * n];
         for node in physical.iter().zip(local_grad) {
             let (x, g) = node;

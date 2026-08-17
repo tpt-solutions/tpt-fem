@@ -5,6 +5,15 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `mesh_to_exodus_bytes` now returns `Result<Vec<u8>, ExodusError>`; the NetCDF-3
+  encoder (`encode_nc3` / `build_header`) propagates dimension-product overflow as
+  an error instead of `.expect()`-ing on the writer path, so encoding can no longer
+  panic.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

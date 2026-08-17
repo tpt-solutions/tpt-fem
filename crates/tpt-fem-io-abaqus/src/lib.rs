@@ -93,12 +93,47 @@ fn cell_to_abaqus_type(cell: CellType) -> &'static str {
     }
 }
 
-/// Parse an Abaqus `.inp` text buffer into a `Mesh`.
+/// A fully parsed Abaqus input deck: the geometry [`Mesh`] plus the named
+/// node/element sets, material definitions, and prescribed-boundary entries
+/// that the geometry-only [`read_inp`] would otherwise discard.
+#[derive(Debug)]
+pub struct InpDeck {
+    /// The mesh assembled from `*NODE` / `*ELEMENT` sections.
+    pub mesh: Mesh,
+    /// `*NSET` definitions: set name -> internal node ids.
+    pub nsets: HashMap<String, Vec<usize>>,
+    /// `*ELSET` definitions: set name -> internal element ids.
+    pub elsets: HashMap<String, Vec<usize>>,
+    /// `*MATERIAL`/`*ELASTIC` definitions: material name -> `(young, poisson)`.
+    pub materials: HashMap<String, (f64, f64)>,
+    /// `*BOUNDARY` prescriptions: `(internal node id, dof, value)`.
+    pub boundary: Vec<(usize, usize, f64)>,
+}
+
+/// Parse an Abaqus `.inp` text buffer into a geometry [`Mesh`].
+///
+/// Convenience wrapper around [`read_inp_deck`] that discards the named sets,
+/// materials, and boundary conditions.
 pub fn read_inp(text: &str) -> Result<Mesh, InpError> {
+    Ok(read_inp_deck(text)?.mesh)
+}
+
+/// Parse an Abaqus `.inp` text buffer into an [`InpDeck`], retaining the
+/// `*NSET` / `*ELSET` / `*MATERIAL` / `*BOUNDARY` sections (not just geometry)
+/// so that real analysis decks can be imported, not only their topology.
+pub fn read_inp_deck(text: &str) -> Result<InpDeck, InpError> {
     let mut builder = MeshBuilder::new();
     let mut id_map: HashMap<u64, usize> = HashMap::new();
+    let mut elem_tag_map: HashMap<u64, usize> = HashMap::new();
     let mut current: Option<Section> = None;
     let mut element_type: Option<CellType> = None;
+    let mut nsets: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut elsets: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut materials: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut boundary: Vec<(usize, usize, f64)> = Vec::new();
+    let mut cur_nset: Option<String> = None;
+    let mut cur_elset: Option<String> = None;
+    let mut cur_material: Option<String> = None;
 
     for raw in text.lines() {
         let line = raw.trim();
@@ -108,18 +143,51 @@ pub fn read_inp(text: &str) -> Result<Mesh, InpError> {
         if line.starts_with('*') {
             // Section header.
             let header = line.trim_start_matches('*');
-            if header.to_uppercase().starts_with("NODE") {
+            let h = header.to_uppercase();
+            if h.starts_with("NODE") {
                 current = Some(Section::Node);
                 element_type = None;
-            } else if header.to_uppercase().starts_with("ELEMENT") {
+                cur_nset = None;
+                cur_elset = None;
+                cur_material = None;
+            } else if h.starts_with("ELEMENT") {
                 current = Some(Section::Element);
                 element_type = parse_element_type(header);
                 if element_type.is_none() {
                     return Err(InpError::UnknownElementType(header.to_string()));
                 }
+                cur_nset = None;
+                cur_elset = None;
+                cur_material = None;
+            } else if h.starts_with("NSET") {
+                current = Some(Section::Nset);
+                cur_nset = set_name(header);
+                cur_elset = None;
+            } else if h.starts_with("ELSET") {
+                current = Some(Section::Elset);
+                cur_elset = set_name(header);
+                cur_nset = None;
+            } else if h.starts_with("MATERIAL") {
+                current = Some(Section::Material);
+                cur_material = set_name(header);
+                cur_nset = None;
+                cur_elset = None;
+            } else if h.starts_with("ELASTIC") {
+                // Associated with the current material; `(young, poisson)`
+                // follows on the next line.
+                current = Some(Section::Elastic);
+                cur_nset = None;
+                cur_elset = None;
+            } else if h.starts_with("BOUNDARY") {
+                current = Some(Section::Boundary);
+                cur_nset = None;
+                cur_elset = None;
             } else {
                 current = None;
                 element_type = None;
+                cur_nset = None;
+                cur_elset = None;
+                cur_material = None;
             }
             continue;
         }
@@ -166,19 +234,146 @@ pub fn read_inp(text: &str) -> Result<Mesh, InpError> {
                         line
                     )));
                 }
-                builder.try_add_element(cell, nodes)?;
+                let aid = parts[0]
+                    .parse::<u64>()
+                    .map_err(|_| InpError::Parse(format!("element id: {line}")))?;
+                let eid = builder.try_add_element(cell, nodes)?;
+                elem_tag_map.insert(aid, eid);
+            }
+            Some(Section::Nset) => {
+                let name = cur_nset
+                    .clone()
+                    .ok_or_else(|| InpError::Parse("NSET without a name".into()))?;
+                for tok in line
+                    .split([',', ' '])
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    let aid = tok
+                        .parse::<u64>()
+                        .map_err(|_| InpError::Parse(format!("nset id: {line}")))?;
+                    let id = *id_map.get(&aid).ok_or_else(|| {
+                        InpError::Parse(format!("nset references unknown node {aid}"))
+                    })?;
+                    nsets.entry(name.clone()).or_default().push(id);
+                }
+            }
+            Some(Section::Elset) => {
+                let name = cur_elset
+                    .clone()
+                    .ok_or_else(|| InpError::Parse("ELSET without a name".into()))?;
+                for tok in line
+                    .split([',', ' '])
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    let aid = tok
+                        .parse::<u64>()
+                        .map_err(|_| InpError::Parse(format!("elset id: {line}")))?;
+                    let id = *elem_tag_map.get(&aid).ok_or_else(|| {
+                        InpError::Parse(format!("elset references unknown element {aid}"))
+                    })?;
+                    elsets.entry(name.clone()).or_default().push(id);
+                }
+            }
+            Some(Section::Material) => {
+                // Name already captured via `cur_material`; no data on this line.
+            }
+            Some(Section::Elastic) => {
+                // `young, poisson[, ...]` follows the `*ELASTIC` header.
+                let parts: Vec<&str> = line
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if parts.len() < 2 {
+                    return Err(InpError::Parse(format!("elastic record: {line}")));
+                }
+                let young = parts[0]
+                    .parse::<f64>()
+                    .map_err(|_| InpError::Parse(format!("young: {line}")))?;
+                let nu = parts[1]
+                    .parse::<f64>()
+                    .map_err(|_| InpError::Parse(format!("poisson: {line}")))?;
+                if let Some(m) = &cur_material {
+                    materials.insert(m.clone(), (young, nu));
+                }
+            }
+            Some(Section::Boundary) => {
+                // `node, first_dof[, last_dof], value`. A single dof when the
+                // middle field is absent; otherwise all dofs in `[first, last]`.
+                let parts: Vec<&str> = line
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if parts.len() < 3 {
+                    return Err(InpError::Parse(format!("boundary record: {line}")));
+                }
+                let aid = parts[0]
+                    .parse::<u64>()
+                    .map_err(|_| InpError::Parse(format!("boundary node: {line}")))?;
+                let id = *id_map.get(&aid).ok_or_else(|| {
+                    InpError::Parse(format!("boundary references unknown node {aid}"))
+                })?;
+                let first = parts[1]
+                    .parse::<usize>()
+                    .map_err(|_| InpError::Parse(format!("boundary dof: {line}")))?;
+                let value = parts[parts.len() - 1]
+                    .parse::<f64>()
+                    .map_err(|_| InpError::Parse(format!("boundary value: {line}")))?;
+                if parts.len() == 3 {
+                    boundary.push((id, first, value));
+                } else {
+                    let last = parts[2]
+                        .parse::<usize>()
+                        .map_err(|_| InpError::Parse(format!("boundary dof: {line}")))?;
+                    for d in first..=last {
+                        boundary.push((id, d, value));
+                    }
+                }
             }
             None => {}
         }
     }
 
-    Ok(builder.try_build()?)
+    let mesh = builder.try_build()?;
+    Ok(InpDeck {
+        mesh,
+        nsets,
+        elsets,
+        materials,
+        boundary,
+    })
+}
+
+/// Extract the `NSET=`/`ELSET=`/`NAME=` value from a header token list.
+fn set_name(header: &str) -> Option<String> {
+    for tok in header.split(',') {
+        let tok = tok.trim();
+        let v = tok
+            .strip_prefix("NSET=")
+            .or_else(|| tok.strip_prefix("nset="))
+            .or_else(|| tok.strip_prefix("ELSET="))
+            .or_else(|| tok.strip_prefix("elset="))
+            .or_else(|| tok.strip_prefix("NAME="))
+            .or_else(|| tok.strip_prefix("name="));
+        if let Some(name) = v {
+            return Some(name.trim().to_string());
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy)]
 enum Section {
     Node,
     Element,
+    Nset,
+    Elset,
+    Material,
+    Elastic,
+    Boundary,
 }
 
 /// Extract the `TYPE=xxx` from an `*ELEMENT` header.
@@ -291,5 +486,41 @@ mod tests {
         assert_eq!(mesh.node_count(), 2);
         assert_eq!(mesh.element_count(), 1);
         assert_eq!(mesh.elements[0].cell_type, CellType::Line);
+    }
+
+    #[test]
+    fn deck_captures_sets_material_boundary() {
+        // A small analysis deck: geometry plus *NSET / *ELSET / *MATERIAL /
+        // *ELASTIC / *BOUNDARY. The deck parser must retain all of them, not
+        // just the topology.
+        let text = "\
+*NODE
+1, 0.0, 0.0, 0.0
+2, 1.0, 0.0, 0.0
+3, 0.0, 1.0, 0.0
+4, 1.0, 1.0, 0.0
+*ELEMENT, TYPE=CPS4
+1, 1, 2, 4, 3
+*NSET, NSET=fixed
+1, 3
+*ELSET, ELSET=plate
+1
+*MATERIAL, NAME=STEEL
+*ELASTIC
+200.0, 0.3
+*BOUNDARY
+1, 1, 0.0
+1, 2, 0.0
+";
+        let deck = read_inp_deck(text).expect("parse deck");
+        assert_eq!(deck.mesh.node_count(), 4);
+        assert_eq!(deck.mesh.element_count(), 1);
+        assert_eq!(deck.nsets.get("fixed").map(|v| v.len()), Some(2));
+        assert_eq!(deck.elsets.get("plate").map(|v| v.len()), Some(1));
+        assert_eq!(deck.materials.get("STEEL"), Some(&(200.0, 0.3)));
+        // Node 1 (internal id 0) pinned in dofs 1 and 2.
+        assert_eq!(deck.boundary.len(), 2);
+        assert!(deck.boundary.contains(&(0, 1, 0.0)));
+        assert!(deck.boundary.contains(&(0, 2, 0.0)));
     }
 }

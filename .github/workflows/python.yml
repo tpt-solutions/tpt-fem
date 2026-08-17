@@ -1,0 +1,32 @@
+name: Python bindings
+
+# Keeps the `tpt-fem-py` crate from silently breaking when the Rust API
+# changes: builds the wheel with maturin and runs the pytest suite.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  py:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install maturin and pytest
+        run: python -m pip install --upgrade pip maturin pytest
+      - name: Build and install the wheel
+        working-directory: crates/tpt-fem-py
+        run: maturin develop
+      - name: Run the pytest suite
+        working-directory: crates/tpt-fem-py
+        run: python -m pytest -q

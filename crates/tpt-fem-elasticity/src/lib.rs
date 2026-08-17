@@ -11,7 +11,7 @@
 //! per-element matrices are scattered by `tpt-fem-assembly` and solved with
 //! `tpt-fem-sparse`.
 
-use tpt_fem_assembly::{assemble, reduce_system, solve_with_dirichlet};
+use tpt_fem_assembly::{reduce_system, solve_with_dirichlet, try_assemble};
 use tpt_fem_eigen::generalized_lanczos_eigs;
 use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
@@ -22,6 +22,36 @@ use tpt_fem_quadrature::{
     TriangleRule,
 };
 use tpt_fem_sparse::{Coo, SparseError};
+
+/// Errors produced while building or solving an elasticity system.
+#[derive(Debug)]
+pub enum ElasticityError {
+    /// A model/dimension combination that has no constitutive definition was
+    /// requested (e.g. `PlaneStress` on a 3-D mesh, or a spatial dimension
+    /// other than 1/2/3).
+    ModelDimMismatch(String),
+    /// The underlying linear-algebra solve failed.
+    Sparse(SparseError),
+}
+
+impl std::fmt::Display for ElasticityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElasticityError::ModelDimMismatch(m) => {
+                write!(f, "elasticity model/dimension mismatch: {m}")
+            }
+            ElasticityError::Sparse(e) => write!(f, "elasticity solve failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ElasticityError {}
+
+impl From<SparseError> for ElasticityError {
+    fn from(e: SparseError) -> Self {
+        ElasticityError::Sparse(e)
+    }
+}
 
 /// The elasticity model (selects the constitutive matrix `D`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,67 +182,78 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
     }
 }
 
-fn strain_dim(dim: usize) -> usize {
+fn strain_dim(dim: usize) -> Result<usize, ElasticityError> {
     match dim {
-        1 => 1,
-        2 => 3,
-        3 => 6,
-        _ => panic!("strain_dim: unsupported dimension {dim}"),
+        1 => Ok(1),
+        2 => Ok(3),
+        3 => Ok(6),
+        _ => Err(ElasticityError::ModelDimMismatch(format!(
+            "unsupported spatial dimension {dim} (expected 1, 2, or 3)"
+        ))),
     }
 }
 
 /// Constitutive matrix `D` (`n_strain × n_strain`) for the given model.
-fn constitutive(model: ElasticModel, e: f64, nu: f64, dim: usize) -> Vec<Vec<f64>> {
+fn constitutive(
+    model: ElasticModel,
+    e: f64,
+    nu: f64,
+    dim: usize,
+) -> Result<Vec<Vec<f64>>, ElasticityError> {
     match (model, dim) {
-        (ElasticModel::BarAxial, 1) => vec![vec![e]],
+        (ElasticModel::BarAxial, 1) => Ok(vec![vec![e]]),
         (ElasticModel::PlaneStress, 2) => {
             let c = e / (1.0 - nu * nu);
-            vec![
+            Ok(vec![
                 vec![c, c * nu, 0.0],
                 vec![c * nu, c, 0.0],
                 vec![0.0, 0.0, c * (1.0 - nu) / 2.0],
-            ]
+            ])
         }
         (ElasticModel::PlaneStrain, 2) => {
             let c = e / ((1.0 + nu) * (1.0 - 2.0 * nu));
-            vec![
+            Ok(vec![
                 vec![c * (1.0 - nu), c * nu, 0.0],
                 vec![c * nu, c * (1.0 - nu), 0.0],
                 vec![0.0, 0.0, c * (1.0 - 2.0 * nu) / 2.0],
-            ]
+            ])
         }
         (ElasticModel::Continuum3D, 3) => {
             let c = e / ((1.0 + nu) * (1.0 - 2.0 * nu));
             let m = (1.0 - nu) * c;
             let d = (1.0 - 2.0 * nu) / 2.0 * c;
-            vec![
+            Ok(vec![
                 vec![m, c * nu, c * nu, 0.0, 0.0, 0.0],
                 vec![c * nu, m, c * nu, 0.0, 0.0, 0.0],
                 vec![c * nu, c * nu, m, 0.0, 0.0, 0.0],
                 vec![0.0, 0.0, 0.0, d, 0.0, 0.0],
                 vec![0.0, 0.0, 0.0, 0.0, d, 0.0],
                 vec![0.0, 0.0, 0.0, 0.0, 0.0, d],
-            ]
+            ])
         }
-        _ => panic!("constitutive: model {model:?} incompatible with dim {dim}"),
+        _ => Err(ElasticityError::ModelDimMismatch(format!(
+            "model {model:?} is incompatible with spatial dimension {dim}"
+        ))),
     }
 }
 
 /// Strain–displacement sub-matrix `B_i` (`n_strain × dim`) for node `i` with
 /// physical gradients `g = [∂N/∂x, ∂N/∂y, ∂N/∂z]`.
-fn b_matrix(g: &[f64], dim: usize) -> Vec<Vec<f64>> {
+fn b_matrix(g: &[f64], dim: usize) -> Result<Vec<Vec<f64>>, ElasticityError> {
     match dim {
-        1 => vec![vec![g[0]]],
-        2 => vec![vec![g[0], 0.0], vec![0.0, g[1]], vec![g[1], g[0]]],
-        3 => vec![
+        1 => Ok(vec![vec![g[0]]]),
+        2 => Ok(vec![vec![g[0], 0.0], vec![0.0, g[1]], vec![g[1], g[0]]]),
+        3 => Ok(vec![
             vec![g[0], 0.0, 0.0],
             vec![0.0, g[1], 0.0],
             vec![0.0, 0.0, g[2]],
             vec![g[1], g[0], 0.0],
             vec![0.0, g[2], g[1]],
             vec![g[2], 0.0, g[0]],
-        ],
-        _ => panic!("b_matrix: unsupported dim {dim}"),
+        ]),
+        _ => Err(ElasticityError::ModelDimMismatch(format!(
+            "b_matrix: unsupported spatial dimension {dim}"
+        ))),
     }
 }
 
@@ -225,7 +266,7 @@ pub fn elasticity_element_matrix(
     young: f64,
     poisson: f64,
     quad_order: usize,
-) -> Vec<Vec<f64>> {
+) -> Result<Vec<Vec<f64>>, ElasticityError> {
     let elem = &mesh.elements[eid];
     let phys: Vec<Vec<f64>> = elem
         .nodes
@@ -235,8 +276,8 @@ pub fn elasticity_element_matrix(
     let cell = elem.cell_type;
     let dim = ref_dim(cell);
     let n = elem.nodes.len();
-    let nstr = strain_dim(dim);
-    let d = constitutive(model, young, poisson, dim);
+    let nstr = strain_dim(dim)?;
+    let d = constitutive(model, young, poisson, dim)?;
     let (qpts, qw) = cell_quad(cell, quad_order);
 
     let mut k = vec![vec![0.0; n * dim]; n * dim];
@@ -245,7 +286,9 @@ pub fn elasticity_element_matrix(
         let map = Map::from_nodes_and_grad(&phys, &local);
         let det = map.determinant.abs();
         let g: Vec<Vec<f64>> = local.iter().map(|g| map.physical_grad(g)).collect();
-        let b: Vec<Vec<Vec<f64>>> = (0..n).map(|i| b_matrix(&g[i], dim)).collect();
+        let b: Vec<Vec<Vec<f64>>> = (0..n)
+            .map(|i| b_matrix(&g[i], dim))
+            .collect::<Result<Vec<_>, _>>()?;
         for i in 0..n {
             for j in 0..n {
                 for a in 0..dim {
@@ -262,7 +305,7 @@ pub fn elasticity_element_matrix(
             }
         }
     }
-    k
+    Ok(k)
 }
 
 /// Element body-force vector (per node `dim` components) from `b(x)`.
@@ -320,9 +363,10 @@ pub fn solve_elasticity(
 ) -> Result<Vec<f64>, SparseError> {
     let dim = ref_dim(mesh.elements[0].cell_type);
     let ndof = mesh.node_count() * dim;
-    let coo = assemble(mesh, dim, |eid, m| {
+    let coo = try_assemble(mesh, dim, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, quad_order)
-    });
+    })
+    .map_err(|e| SparseError::Numeric(e.to_string()))?;
     let mut rhs = vec![0.0; ndof];
     for eid in 0..mesh.elements.len() {
         let f = elasticity_body_vector(mesh, eid, &body_force, quad_order);
@@ -432,9 +476,10 @@ pub fn solve_modal(
 ) -> Result<Vec<(f64, Vec<f64>)>, SparseError> {
     let dim = ref_dim(mesh.elements[0].cell_type);
     let ndof = mesh.node_count() * dim;
-    let k = assemble(mesh, dim, |eid, m| {
+    let k = try_assemble(mesh, dim, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, quad_order)
-    });
+    })
+    .map_err(|e| SparseError::Numeric(e.to_string()))?;
     let m = elasticity_mass_matrix(mesh, model, density, quad_order);
 
     let red_k = reduce_system(&k, &vec![0.0; ndof], dirichlet);
@@ -872,5 +917,29 @@ mod tests {
         let w1 = modes[0].0.sqrt();
         let expected = std::f64::consts::PI / 2.0 * (ea / rho_a).sqrt();
         assert!((w1 - expected).abs() < 1e-3, "got {w1} expected {expected}");
+    }
+
+    #[test]
+    fn element_matrix_rejects_model_dim_mismatch() {
+        // A 3-D hex mesh combined with a 2-D `PlaneStress` model has no
+        // constitutive definition; the element operator must surface that as a
+        // `ModelDimMismatch` error rather than panicking.
+        let mut b = MeshBuilder::new();
+        let n000 = b.add_node(vec![0.0, 0.0, 0.0]);
+        let n100 = b.add_node(vec![1.0, 0.0, 0.0]);
+        let n110 = b.add_node(vec![1.0, 1.0, 0.0]);
+        let n010 = b.add_node(vec![0.0, 1.0, 0.0]);
+        let n001 = b.add_node(vec![0.0, 0.0, 1.0]);
+        let n101 = b.add_node(vec![1.0, 0.0, 1.0]);
+        let n111 = b.add_node(vec![1.0, 1.0, 1.0]);
+        let n011 = b.add_node(vec![0.0, 1.0, 1.0]);
+        b.add_element(
+            CellType::Hex,
+            vec![n000, n100, n110, n010, n001, n101, n111, n011],
+        );
+        let mesh = b.build();
+        let err = elasticity_element_matrix(&mesh, 0, ElasticModel::PlaneStress, 1.0, 0.3, 2)
+            .expect_err("PlaneStress on a 3-D mesh must error");
+        assert!(matches!(err, ElasticityError::ModelDimMismatch(_)));
     }
 }

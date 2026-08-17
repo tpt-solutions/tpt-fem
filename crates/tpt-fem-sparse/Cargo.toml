@@ -29,3 +29,10 @@ russell = ["russell_sparse", "russell_lab"]
 [lints]
 workspace = true
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "dense_solve"
+harness = false
+

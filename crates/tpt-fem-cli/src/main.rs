@@ -9,12 +9,14 @@
 //! input reports a human-readable cause rather than a panic.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use tpt_fem::{
-    boundary_faces, box_mesh, solve_poisson, write_vtk, write_vtk_with_data, CellType, Mesh,
-    MeshBuilder, MeshError, PointData,
+    boundary_faces, box_mesh, read_exodus, read_inp, solve_elasticity, solve_modal, solve_poisson,
+    write_vtk, write_vtk_with_data, CellType, ElasticModel, Mesh, MeshBuilder, MeshError,
+    PointData,
 };
 
 type Err = Box<dyn std::error::Error>;
@@ -34,6 +36,16 @@ struct Cli {
 enum Command {
     /// Solve a problem defined by a TOML config file.
     Solve {
+        /// Path to the TOML problem description.
+        config: PathBuf,
+    },
+    /// Solve a linear-elasticity problem (TOML config, `problem.type = "elasticity"`).
+    Elasticity {
+        /// Path to the TOML problem description.
+        config: PathBuf,
+    },
+    /// Solve a natural-vibration (modal) problem (TOML config, `problem.type = "modal"`).
+    Modal {
         /// Path to the TOML problem description.
         config: PathBuf,
     },
@@ -73,13 +85,29 @@ struct Config {
 
 #[derive(Deserialize, Default)]
 struct Problem {
-    /// Problem type; only `"poisson"` (heat conduction) is supported this pass.
+    /// Problem type: `"poisson"` (steady heat conduction), `"elasticity"`
+    /// (linear statics), or `"modal"` (natural vibration modes).
     #[serde(default = "default_problem")]
     r#type: String,
+    /// Elasticity model for `problem.type = "elasticity"` / `"modal"`:
+    /// `"bar"`, `"plane-stress"`, `"plane-strain"`, or `"3d"`.
+    #[serde(default = "default_model")]
+    model: String,
+    /// Number of vibration modes to extract for `problem.type = "modal"`.
+    #[serde(default = "four")]
+    num_modes: usize,
 }
 
 fn default_problem() -> String {
     "poisson".into()
+}
+
+fn default_model() -> String {
+    "plane-stress".into()
+}
+
+fn four() -> usize {
+    4
 }
 
 #[derive(Deserialize, Default)]
@@ -87,10 +115,23 @@ struct Material {
     /// Constant conductivity `k` in `-∇·(k∇u) = f`.
     #[serde(default = "one")]
     conductivity: f64,
+    /// Young's modulus `E` for elasticity / modal problems.
+    #[serde(default = "one")]
+    young: f64,
+    /// Poisson's ratio `ν` for elasticity / modal problems.
+    #[serde(default = "default_poisson")]
+    poisson: f64,
+    /// Mass density `ρ` for modal problems.
+    #[serde(default = "one")]
+    density: f64,
 }
 
 fn one() -> f64 {
     1.0
+}
+
+fn default_poisson() -> f64 {
+    0.3
 }
 
 #[derive(Deserialize, Default)]
@@ -191,6 +232,8 @@ fn run() -> Result<(), Err> {
     let cli = Cli::parse();
     match cli.command {
         Command::Solve { config } => solve_config(&config),
+        Command::Elasticity { config } => solve_config(&config),
+        Command::Modal { config } => solve_config(&config),
         Command::Mesh { action } => match action {
             MeshAction::Info { file } => mesh_info(&file),
             MeshAction::Convert { input, output } => mesh_convert(&input, &output),
@@ -344,14 +387,6 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
     let text = std::fs::read_to_string(path)?;
     let cfg: Config = toml::from_str(&text)?;
 
-    if cfg.problem.r#type != "poisson" {
-        return Err(format!(
-            "unsupported problem type '{}' (only 'poisson' is supported this pass)",
-            cfg.problem.r#type
-        )
-        .into());
-    }
-
     let mesh = build_mesh(&cfg.mesh)?;
     println!(
         "Mesh: {} nodes, {} elements",
@@ -361,30 +396,143 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
 
     let mut bcs = Vec::new();
     for bc in &cfg.bc {
-        let n = bc_nodes(&mesh, bc);
-        bcs.extend(n);
+        bcs.extend(bc_nodes(&mesh, bc));
     }
     println!("Applied {} Dirichlet conditions", bcs.len());
 
-    let f = cfg.source.constant;
-    let u = solve_poisson(
-        &mesh,
-        cfg.material.conductivity,
-        4,
-        move |_| f,
-        &bcs,
-        None,
-        None,
-    )?;
-
-    let umin = u.iter().cloned().fold(f64::INFINITY, f64::min);
-    let umax = u.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    println!("Solution u in [{:.6e}, {:.6e}]", umin, umax);
-
     let vtk = &cfg.output.vtk;
-    write_vtk_with_data(&mesh, &[PointData::new("u", u)], vtk)?;
+    match cfg.problem.r#type.as_str() {
+        "poisson" => {
+            let f = cfg.source.constant;
+            let ndof = mesh.node_count();
+            let t0 = Instant::now();
+            let u = solve_poisson(
+                &mesh,
+                cfg.material.conductivity,
+                4,
+                move |_| f,
+                &bcs,
+                None,
+                None,
+            )?;
+            let elapsed = t0.elapsed();
+            let umin = u.iter().cloned().fold(f64::INFINITY, f64::min);
+            let umax = u.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            // Brief report summary so results can be sanity-checked without
+            // opening ParaView (DOF count, solve time, solution range).
+            println!("DOFs:      {}", ndof);
+            println!("Solve time: {:.3?}", elapsed);
+            println!("Solution u in [{:.6e}, {:.6e}]", umin, umax);
+            write_vtk_with_data(&mesh, &[PointData::new("u", u)], vtk)?;
+        }
+        "elasticity" => {
+            let model = parse_model(&cfg.problem.model)?;
+            let dim = cell_dim(mesh.elements[0].cell_type);
+            // Fully fix every DOF of each selected node (a richer per-component
+            // constraint schema is a future extension).
+            let dir = expand_dirichlet(&bcs, dim);
+            let ndof = mesh.node_count() * dim;
+            let t0 = Instant::now();
+            let u = solve_elasticity(
+                &mesh,
+                model,
+                cfg.material.young,
+                cfg.material.poisson,
+                4,
+                |_| vec![0.0; dim],
+                &dir,
+            )?;
+            let elapsed = t0.elapsed();
+            let disp = disp_magnitude(&u, dim);
+            let dmax = disp.iter().cloned().fold(0.0_f64, f64::max);
+            println!("DOFs:      {}", ndof);
+            println!("Solve time: {:.3?}", elapsed);
+            println!("Max |displacement|: {:.6e}", dmax);
+            write_vtk_with_data(&mesh, &[PointData::new("displacement", disp)], vtk)?;
+        }
+        "modal" => {
+            let model = parse_model(&cfg.problem.model)?;
+            let dim = cell_dim(mesh.elements[0].cell_type);
+            let dir = expand_dirichlet(&bcs, dim);
+            let ndof = mesh.node_count() * dim;
+            let t0 = Instant::now();
+            let modes = solve_modal(
+                &mesh,
+                model,
+                cfg.material.young,
+                cfg.material.poisson,
+                cfg.material.density,
+                4,
+                cfg.problem.num_modes,
+                &dir,
+            )?;
+            let elapsed = t0.elapsed();
+            let (lam, phi) = &modes[0];
+            let shape = disp_magnitude(phi, dim);
+            println!("DOFs:      {}", ndof);
+            println!("Solve time: {:.3?}", elapsed);
+            println!(
+                "Fundamental frequency ω = {:.6e} (ω² = {:.6e})",
+                lam.sqrt(),
+                lam
+            );
+            write_vtk_with_data(&mesh, &[PointData::new("mode1", shape)], vtk)?;
+        }
+        other => {
+            return Err(format!(
+                "unsupported problem type '{other}' (supported: poisson, elasticity, modal)"
+            )
+            .into());
+        }
+    }
     println!("Wrote {}", vtk.display());
     Ok(())
+}
+
+/// Reference (spatial) dimension of a cell type.
+fn cell_dim(cell: CellType) -> usize {
+    match cell {
+        CellType::Line => 1,
+        CellType::Tri | CellType::Quad | CellType::Tri6 | CellType::Quad8 | CellType::Quad9 => 2,
+        CellType::Tet | CellType::Hex | CellType::Tet10 | CellType::Hex20 | CellType::Hex27 => 3,
+    }
+}
+
+/// Parse an elasticity/model string into [`ElasticModel`].
+fn parse_model(s: &str) -> Result<ElasticModel, Err> {
+    match s.to_ascii_lowercase().replace(['-', '_'], "").as_str() {
+        "bar" | "baraxial" => Ok(ElasticModel::BarAxial),
+        "planestress" => Ok(ElasticModel::PlaneStress),
+        "planestrain" => Ok(ElasticModel::PlaneStrain),
+        "3d" | "continuum" | "continuum3d" => Ok(ElasticModel::Continuum3D),
+        other => Err(format!("unknown elasticity model '{other}'").into()),
+    }
+}
+
+/// Expand per-node Dirichlet conditions into per-DOF `(global_dof, value)`
+/// pairs, constraining all `dim` components of each selected node.
+fn expand_dirichlet(bcs: &[(usize, f64)], dim: usize) -> Vec<(usize, f64)> {
+    let mut dir = Vec::new();
+    for (node, val) in bcs {
+        for c in 0..dim {
+            dir.push((node * dim + c, *val));
+        }
+    }
+    dir
+}
+
+/// Per-node displacement magnitude from a `node_count * dim` solution vector.
+fn disp_magnitude(u: &[f64], dim: usize) -> Vec<f64> {
+    let n = u.len() / dim;
+    (0..n)
+        .map(|i| {
+            let mut s = 0.0;
+            for c in 0..dim {
+                s += u[i * dim + c] * u[i * dim + c];
+            }
+            s.sqrt()
+        })
+        .collect()
 }
 
 fn mesh_info(path: &PathBuf) -> Result<(), Err> {
@@ -446,7 +594,18 @@ fn load_mesh(path: &PathBuf) -> Result<Mesh, Err> {
                 .map_err(|e| MeshError::Parse(format!("vtk import: {e}")))?;
             mesh_from_vtk(&vtk)
         }
-        other => Err(format!("unsupported mesh extension '.{other}' (use .msh or .vtk)").into()),
+        // Abaqus input deck (geometry + the `*NSET`/`*ELSET`/`*MATERIAL`/
+        // `*BOUNDARY` sections). See `tpt-fem-io-abaqus`.
+        "inp" => {
+            let text = std::fs::read_to_string(path)?;
+            Ok(read_inp(&text).map_err(|e| format!("abaqus import: {e}"))?)
+        }
+        // Exodus II (NetCDF-3) mesh.
+        "ex" | "ex2" | "e" => Ok(read_exodus(path).map_err(|e| format!("exodus import: {e}"))?),
+        other => Err(format!(
+            "unsupported mesh extension '.{other}' (use .msh, .vtk, .inp, or .ex)"
+        )
+        .into()),
     }
 }
 
@@ -499,4 +658,177 @@ fn mesh_from_vtk(vtk: &vtkio::model::Vtk) -> Result<Mesh, Err> {
         i += 1 + cnt;
     }
     Ok(b.build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// A minimal valid Gmsh v4.1 `.msh` (two triangles on the unit square).
+    const TRI_MSH: &str = "\
+$MeshFormat
+4.1 0 8
+$EndMeshFormat
+$Nodes
+1 4 1 4
+2 1 0 4
+1 2 3 4
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+$EndNodes
+$Elements
+1 2 1 2
+2 1 2 2
+1 1 2 3
+2 2 4 3
+$EndElements
+";
+
+    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, contents).expect("write temp file");
+        path
+    }
+
+    #[test]
+    fn solve_runs_and_writes_vtk() {
+        // Box mesh, homogeneous Dirichlet on the boundary, zero source => the
+        // trivial solution u = 0. The test just verifies the end-to-end path
+        // (config parse -> build -> assemble -> solve -> VTK export) succeeds
+        // and produces a non-empty output file.
+        let out = std::env::temp_dir().join("tpt_fem_cli_solve_test.vtk");
+        // Windows temp paths contain backslashes, which TOML would parse as
+        // escape sequences; use forward slashes inside the generated config.
+        let out_toml = out.to_string_lossy().replace('\\', "/");
+        let cfg = format!(
+            "[problem]\ntype = \"poisson\"\n\
+             [mesh]\ndim = 2\nmin = [0.0, 0.0]\nmax = [1.0, 1.0]\nn = [4, 4]\n\
+             [material]\nconductivity = 1.0\n[source]\nconstant = 0.0\n\
+             [[bc]]\nvalue = 0.0\nboundary = true\n\
+             [output]\nvtk = \"{}\"\n",
+            out_toml
+        );
+        let cfg_path = write_temp("tpt_fem_cli_solve_test.toml", &cfg);
+        solve_config(&cfg_path).expect("solve_config");
+        let meta = std::fs::metadata(&out).expect("output written");
+        assert!(meta.len() > 0, "VTK output should be non-empty");
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&cfg_path);
+    }
+
+    #[test]
+    fn mesh_info_reports_counts() {
+        let path = write_temp("tpt_fem_cli_info_test.msh", TRI_MSH);
+        // Should not error and should report 4 nodes / 2 elements.
+        mesh_info(&path).expect("mesh_info");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn mesh_convert_produces_vtk() {
+        let msh = write_temp("tpt_fem_cli_convert_in.msh", TRI_MSH);
+        let out = std::env::temp_dir().join("tpt_fem_cli_convert_out.vtk");
+        mesh_convert(&msh, &out).expect("mesh_convert");
+        let meta = std::fs::metadata(&out).expect("converted file written");
+        assert!(meta.len() > 0);
+        let _ = std::fs::remove_file(&msh);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn load_mesh_handles_inp_and_exodus() {
+        // Both the Abaqus and Exodus readers must round-trip the same triangle.
+        let msh = write_temp("tpt_fem_cli_load.msh", TRI_MSH);
+        let mesh0 = load_mesh(&msh).expect("load .msh");
+        let n = mesh0.node_count();
+        let e = mesh0.element_count();
+
+        // Abaqus: export via the writer, re-import through the CLI loader.
+        let inp_path = std::env::temp_dir().join("tpt_fem_cli_load.inp");
+        tpt_fem::write_inp(&mesh0, &inp_path).expect("write .inp");
+        let mesh_inp = load_mesh(&inp_path).expect("load .inp");
+        assert_eq!(mesh_inp.node_count(), n);
+        assert_eq!(mesh_inp.element_count(), e);
+
+        // Exodus: export via the writer, re-import through the CLI loader.
+        let ex_path = std::env::temp_dir().join("tpt_fem_cli_load.ex");
+        tpt_fem::write_exodus(&mesh0, &ex_path).expect("write .ex");
+        let mesh_ex = load_mesh(&ex_path).expect("load .ex");
+        assert_eq!(mesh_ex.node_count(), n);
+        assert_eq!(mesh_ex.element_count(), e);
+
+        let _ = std::fs::remove_file(&msh);
+        let _ = std::fs::remove_file(&inp_path);
+        let _ = std::fs::remove_file(&ex_path);
+    }
+
+    #[test]
+    fn cli_usage_matches_readme() {
+        // Drift guard: the README documents `cargo run -p tpt-fem-cli -- solve
+        // problem.toml`, i.e. `solve` takes a single *positional* config file.
+        // If the clap definition changes (e.g. becomes `--config`/flags), this
+        // fails loudly instead of the docs silently diverging.
+        let mut cmd = Cli::command();
+        for sub in ["solve", "elasticity", "modal"] {
+            let usage = cmd
+                .find_subcommand_mut(sub)
+                .expect("subcommand exists")
+                .render_usage()
+                .to_string();
+            assert!(
+                usage.contains(format!("{sub} <CONFIG>").as_str()),
+                "{sub} usage drifted from README: {usage}"
+            );
+        }
+        // And the bare-positional form must actually parse.
+        Cli::command().debug_assert()
+    }
+
+    #[test]
+    fn elasticity_runs_and_writes_vtk() {
+        // Clamped 2-D box, zero body load => the trivial displacement field.
+        // Verifies the `elasticity` subcommand path (config -> mesh -> assemble
+        // -> solve_elasticity -> VTK) succeeds and writes a non-empty file.
+        let out = std::env::temp_dir().join("tpt_fem_cli_elasticity_test.vtk");
+        let out_toml = out.to_string_lossy().replace('\\', "/");
+        let cfg = format!(
+            "[problem]\ntype = \"elasticity\"\nmodel = \"plane-stress\"\n\
+             [mesh]\ndim = 2\nmin = [0.0, 0.0]\nmax = [1.0, 1.0]\nn = [4, 4]\n\
+             [material]\nyoung = 1.0\npoisson = 0.3\n\
+             [[bc]]\nvalue = 0.0\nboundary = true\n\
+             [output]\nvtk = \"{}\"\n",
+            out_toml
+        );
+        let cfg_path = write_temp("tpt_fem_cli_elasticity_test.toml", &cfg);
+        solve_config(&cfg_path).expect("elasticity solve_config");
+        let meta = std::fs::metadata(&out).expect("output written");
+        assert!(meta.len() > 0, "VTK output should be non-empty");
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&cfg_path);
+    }
+
+    #[test]
+    fn modal_runs_and_writes_vtk() {
+        // Clamped 2-D box modal problem: must extract the fundamental mode
+        // without error and write a non-empty file.
+        let out = std::env::temp_dir().join("tpt_fem_cli_modal_test.vtk");
+        let out_toml = out.to_string_lossy().replace('\\', "/");
+        let cfg = format!(
+            "[problem]\ntype = \"modal\"\nmodel = \"plane-stress\"\nnum_modes = 2\n\
+             [mesh]\ndim = 2\nmin = [0.0, 0.0]\nmax = [1.0, 1.0]\nn = [6, 6]\n\
+             [material]\nyoung = 1.0\npoisson = 0.3\ndensity = 1.0\n\
+             [[bc]]\nvalue = 0.0\nboundary = true\n\
+             [output]\nvtk = \"{}\"\n",
+            out_toml
+        );
+        let cfg_path = write_temp("tpt_fem_cli_modal_test.toml", &cfg);
+        solve_config(&cfg_path).expect("modal solve_config");
+        let meta = std::fs::metadata(&out).expect("output written");
+        assert!(meta.len() > 0, "VTK output should be non-empty");
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&cfg_path);
+    }
 }

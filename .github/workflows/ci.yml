@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly run so the heavy `#[ignore]`d 3-D MMS convergence test
+  # (`mms_3d_converges`) actually executes instead of never running in CI.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -81,6 +86,36 @@ jobs:
             cargo +nightly build --bin $t
           done
 
+  # Actually execute the fuzz targets (the `fuzz-build` job only compiles them).
+  # Runs on the nightly schedule / manual dispatch, with the corpus and crash
+  # artifacts cached between runs so seeds and findings accumulate. Each target
+  # gets a bounded wall-clock budget.
+  fuzz-run:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Cache fuzz corpus and artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            fuzz/corpus
+            fuzz/artifacts
+          key: fuzz-corpus-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-
+      - name: Run fuzz targets
+        run: |
+          cd fuzz
+          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip; do
+            cargo +nightly fuzz run $t -- -max_total_time=120 -timeout=10
+          done
+
+
   # No no_std job: every tpt-fem-* crate needs std (Vec/HashMap-backed mesh
   # and sparse-matrix data structures, file I/O for mesh import), unlike
   # tpt-math's no_std=true substrate crates. Revisit only if a future crate
@@ -93,3 +128,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check
+
+  # Heavy `#[ignore]`d 3-D MMS convergence test (`mms_3d_converges`) — runs on
+  # the nightly schedule (and manually) rather than in the fast `test` job, so
+  # it actually gets exercised instead of bit-rotting.
+  mms-3d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p tpt-fem-thermal --features mesh-gen -- --ignored mms_3d_converges

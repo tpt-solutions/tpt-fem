@@ -279,33 +279,65 @@ mod tests {
 
     #[test]
     fn poisson_p2_tri6_linear_is_exact() {
-        // Single Tri6 element on the reference triangle. `u = x` is linear, so
-        // the P2 interpolant is exact; with Dirichlet on the three vertices the
-        // free mid-nodes must recover the linear field (verifies the full
-        // P2 assembly + solve path end to end).
-        use tpt_fem_element::Tri6;
-        let phys = Tri6::nodes();
+        // Four Tri6 elements around an interior centre node tile the unit
+        // square. `u = x` is harmonic and linear, so it lies in the P2 space;
+        // with Dirichlet imposed on every boundary node (the four corners and
+        // the four edge midpoints) the Galerkin solution must equal `u = x`
+        // everywhere — in particular at the interior centre and the four
+        // "radius" midpoints. This exercises the full P2 assembly + solve path
+        // end to end through a genuine interior node (a single Tri6, or two
+        // Tri6 forming a square, has no interior node, so corner-only Dirichlet
+        // does not pin the edge-mid values to the linear field).
         let mut b = MeshBuilder::new();
-        let mut ids = Vec::new();
-        for p in &phys {
-            ids.push(b.add_node(vec![p[0], p[1]]));
-        }
-        b.add_element(CellType::Tri6, ids.clone());
+        // Boundary corners.
+        let a = b.add_node(vec![0.0, 0.0]); // u = 0
+        let bp = b.add_node(vec![1.0, 0.0]); // u = 1
+        let c = b.add_node(vec![1.0, 1.0]); // u = 1
+        let d = b.add_node(vec![0.0, 1.0]); // u = 0
+                                            // Boundary edge midpoints.
+        let eab = b.add_node(vec![0.5, 0.0]); // u = 0.5
+        let ebc = b.add_node(vec![1.0, 0.5]); // u = 1.0
+        let ecd = b.add_node(vec![0.5, 1.0]); // u = 0.5
+        let eda = b.add_node(vec![0.0, 0.5]); // u = 0.0
+                                              // Interior centre node + the four "radius" midpoints.
+        let o = b.add_node(vec![0.5, 0.5]); // u = 0.5
+        let moa = b.add_node(vec![0.25, 0.25]); // u = 0.25
+        let mob = b.add_node(vec![0.75, 0.25]); // u = 0.75
+        let moc = b.add_node(vec![0.75, 0.75]); // u = 0.75
+        let mod_ = b.add_node(vec![0.25, 0.75]); // u = 0.25
+                                                 // Four Tri6 elements, each a corner-corner-centre triangle with the
+                                                 // appropriate edge midpoints in reference (corner0, corner1, corner2,
+                                                 // mid(c0-c1), mid(c1-c2), mid(c2-c0)) order.
+        b.add_element(CellType::Tri6, vec![a, bp, o, eab, mob, moa]);
+        b.add_element(CellType::Tri6, vec![bp, c, o, ebc, moc, mob]);
+        b.add_element(CellType::Tri6, vec![c, d, o, ecd, mod_, moc]);
+        b.add_element(CellType::Tri6, vec![d, a, o, eda, moa, mod_]);
         let mesh = b.build();
         let u = solve_poisson(
             &mesh,
             1.0,
             4,
-            |x| x[0],
-            &[(ids[0], 0.0), (ids[1], 1.0), (ids[2], 0.0)],
+            |_| 0.0,
+            &[
+                (a, 0.0),
+                (bp, 1.0),
+                (c, 1.0),
+                (d, 0.0),
+                (eab, 0.5),
+                (ebc, 1.0),
+                (ecd, 0.5),
+                (eda, 0.0),
+            ],
             None,
             None,
         )
         .unwrap();
-        // Mid nodes: (0.5,0) -> 0.5, (0.5,0.5) -> 0.5, (0,0.5) -> 0.0.
-        assert!((u[ids[3]] - 0.5).abs() < 1e-9, "got {}", u[ids[3]]);
-        assert!((u[ids[4]] - 0.5).abs() < 1e-9, "got {}", u[ids[4]]);
-        assert!((u[ids[5]] - 0.0).abs() < 1e-9, "got {}", u[ids[5]]);
+        // Interior nodes must equal the exact linear field `u = x`.
+        assert!((u[o] - 0.5).abs() < 1e-9, "centre got {}", u[o]);
+        assert!((u[moa] - 0.25).abs() < 1e-9, "moa got {}", u[moa]);
+        assert!((u[mob] - 0.75).abs() < 1e-9, "mob got {}", u[mob]);
+        assert!((u[moc] - 0.75).abs() < 1e-9, "moc got {}", u[moc]);
+        assert!((u[mod_] - 0.25).abs() < 1e-9, "mod got {}", u[mod_]);
     }
 
     #[test]

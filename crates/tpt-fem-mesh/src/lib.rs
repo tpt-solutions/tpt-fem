@@ -355,32 +355,32 @@ impl Mesh {
                 if element.nodes.len() != expected {
                     return Err(MeshError::UnsupportedElementType(block.element_type as u8));
                 }
-            let node_ids: Vec<NodeId> = element
-                .nodes
-                .iter()
-                .map(|t| {
-                    tag_to_id
-                        .get(t)
-                        .copied()
-                        .ok_or(MeshError::DanglingNodeTag(*t))
-                })
-                .collect::<Result<_, _>>()?;
-            // Quadratic (P2) Gmsh elements store their nodes in a different
-            // order than `tpt-fem-element`'s reference element (see
-            // `p2_gmsh_reference`); reorder so our connectivity matches the
-            // reference-element node indexing the physics crates expect.
-            let node_ids = if cell.is_p2() {
-                reorder_p2(cell, &node_ids)
-            } else {
-                node_ids
-            };
-            let id = elements.len();
-            elements.push(Element {
-                id,
-                cell_type: cell,
-                nodes: node_ids,
-                region,
-            });
+                let node_ids: Vec<NodeId> = element
+                    .nodes
+                    .iter()
+                    .map(|t| {
+                        tag_to_id
+                            .get(t)
+                            .copied()
+                            .ok_or(MeshError::DanglingNodeTag(*t))
+                    })
+                    .collect::<Result<_, _>>()?;
+                // Quadratic (P2) Gmsh elements store their nodes in a different
+                // order than `tpt-fem-element`'s reference element (see
+                // `p2_gmsh_reference`); reorder so our connectivity matches the
+                // reference-element node indexing the physics crates expect.
+                let node_ids = if cell.is_p2() {
+                    reorder_p2(cell, &node_ids)
+                } else {
+                    node_ids
+                };
+                let id = elements.len();
+                elements.push(Element {
+                    id,
+                    cell_type: cell,
+                    nodes: node_ids,
+                    region,
+                });
             }
         }
 
@@ -704,6 +704,7 @@ fn reorder_p2(cell: CellType, gmsh_nodes: &[NodeId]) -> Vec<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tpt_fem_element::ReferenceElement;
 
     #[test]
     fn builder_and_dofs() {
@@ -905,17 +906,12 @@ $EndElements
         let mut coords = String::new();
         for (i, r) in gmsh_ref.iter().enumerate() {
             tags.push_str(&format!("{} ", i + 1));
-            let phys: Vec<String> = r
-                .iter()
-                .map(|v| format!("{:.6}", v * 0.5 + 0.5))
-                .collect();
-            // Pad to 3 coordinates (z = 0 for 2-D).
-            let mut line = phys;
-            while line.len() < 3 {
-                line.push_str(" 0.000000");
-            }
-            coords.push_str(&line.join(" "));
-            coords.push('\n');
+            // Physical coordinate = ref*0.5 + 0.5, padded to 3 components
+            // (z = 0 for 2-D element types).
+            let x = r[0] * 0.5 + 0.5;
+            let y = r.get(1).copied().unwrap_or(0.0) * 0.5 + 0.5;
+            let z = r.get(2).copied().unwrap_or(0.0) * 0.5 + 0.5;
+            coords.push_str(&format!("{:.6} {:.6} {:.6}\n", x, y, z));
         }
         nodes_section.push_str(tags.trim_end());
         nodes_section.push('\n');
@@ -938,9 +934,7 @@ $EndElements
         }
         elements_section.push_str("\n$EndElements\n");
 
-        format!(
-            "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n{nodes_section}{elements_section}"
-        )
+        format!("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n{nodes_section}{elements_section}")
     }
 
     #[test]
@@ -949,16 +943,23 @@ $EndElements
         assert_eq!(mesh.node_count(), 6);
         assert_eq!(mesh.element_count(), 1);
         assert_eq!(mesh.elements[0].cell_type, CellType::Tri6);
-        // Our reference ordering equals Gmsh ordering for Tri6, so the imported
-        // connectivity should already be in reference order: node 0 (ref 0,0) is
-        // the physical node at (0,0,0).
-        assert!(mesh.node_coords(mesh.elements[0].nodes[0])[..2]
-            .iter()
-            .all(|v| v.abs() < 1e-9));
-        // Our index 4 is the edge midpoint (0.5, 0.5); physically (0.75, 0.75)
-        // under the ref*0.5+0.5 mapping.
-        let mid = mesh.node_coords(mesh.elements[0].nodes[4]);
-        assert!((mid[0] - 0.75).abs() < 1e-6 && (mid[1] - 0.75).abs() < 1e-6);
+        // After reordering, our local index `i` must hold the reference node
+        // `i`. `p2_msh` places each Gmsh node at `ref*0.5 + 0.5`, so the
+        // physical coordinate of our node `i` must equal `Tri6::nodes()[i] *
+        // 0.5 + 0.5` (in the first two components). This verifies the
+        // Gmsh -> reference reorder is correct for every node.
+        let our_ref = tpt_fem_element::Tri6::nodes();
+        for (oi, node) in mesh.elements[0].nodes.iter().enumerate() {
+            let c = mesh.node_coords(*node);
+            assert!(
+                (c[0] - (our_ref[oi][0] * 0.5 + 0.5)).abs() < 1e-6,
+                "node {oi} x"
+            );
+            assert!(
+                (c[1] - (our_ref[oi][1] * 0.5 + 0.5)).abs() < 1e-6,
+                "node {oi} y"
+            );
+        }
     }
 
     #[test]

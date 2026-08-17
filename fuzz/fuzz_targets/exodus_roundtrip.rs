@@ -13,6 +13,9 @@ libfuzzer_sys::fuzz_target!(|_data: &[u8]| {
     b.add_element(CellType::Tri, vec![n1, n3, n2]);
     let mesh = b.build();
 
-    let bytes = tpt_fem_io_exodus::mesh_to_exodus_bytes(&mesh);
+    let bytes = match tpt_fem_io_exodus::mesh_to_exodus_bytes(&mesh) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
     let _ = tpt_fem_io_exodus::bytes_to_mesh(&bytes);
 });

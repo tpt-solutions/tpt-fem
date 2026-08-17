@@ -5,6 +5,17 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ElasticityError` surfaced when a model/dimension combination has no
+  constitutive definition (e.g. `PlaneStress` on a 3-D mesh), replacing the
+  previous `panic!` in `strain_dim` / `constitutive` / `b_matrix`.
+- `elasticity_element_matrix` now returns `Result<_, ElasticityError>`; the
+  assembly primitive gained a fallible `try_assemble` so element-matrix failures
+  propagate instead of panicking.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

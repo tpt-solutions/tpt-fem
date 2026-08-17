@@ -32,7 +32,7 @@ let mesh = read_exodus("mesh.ex2")?;
 write_exodus(&mesh, "mesh.ex2")?;
 
 // Or work with raw bytes (useful for in-memory pipelines).
-let bytes = mesh_to_exodus_bytes(&mesh);
+let bytes = mesh_to_exodus_bytes(&mesh)?;
 let mesh2 = bytes_to_mesh(&bytes)?;
 ```
 

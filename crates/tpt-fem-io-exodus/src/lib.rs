@@ -134,23 +134,24 @@ fn sane_count(count: usize, bytes: &[u8]) -> Result<usize, ExodusError> {
 }
 
 /// Encode a file from dimensions and variables into NetCDF-3 classic bytes.
-fn encode_nc3(dims: &[NcDim], vars: &[NcVar]) -> Vec<u8> {
+///
+/// Returns an error (rather than panicking) if a variable's dimension product
+/// overflows a `u32`; this is unreachable for meshes we encode in practice, but
+/// surfacing it as [`ExodusError`] keeps the writer panic-free.
+fn encode_nc3(dims: &[NcDim], vars: &[NcVar]) -> Result<Vec<u8>, ExodusError> {
     // First pass: header with placeholder begins (we recompute afterwards).
-    let header = build_header(dims, vars, &vec![0u32; vars.len()]);
+    let header = build_header(dims, vars, &vec![0u32; vars.len()])?;
     let mut data_off = header.len();
     data_off = (data_off + 3) & !3;
     let mut begins = Vec::with_capacity(vars.len());
     let mut cursor = data_off;
     for v in vars {
         begins.push(cursor as u32);
-        // Safe: `dims`/`vars` are fully constructed in this crate from a
-        // validated `Mesh`; the only way `vsize_of` fails is a u32 overflow of
-        // a dimension product, which cannot happen for mesh sizes we encode.
-        let size = vsize_of(dims, v).expect("encoded dimensions are always valid") as usize;
+        let size = vsize_of(dims, v)? as usize;
         cursor += size;
         cursor = (cursor + 3) & !3;
     }
-    let header = build_header(dims, vars, &begins);
+    let header = build_header(dims, vars, &begins)?;
 
     let mut out = header;
     // Pad header to 4-byte boundary (already aligned by construction of vars
@@ -164,10 +165,10 @@ fn encode_nc3(dims: &[NcDim], vars: &[NcVar]) -> Vec<u8> {
             out.push(0);
         }
     }
-    out
+    Ok(out)
 }
 
-fn build_header(dims: &[NcDim], vars: &[NcVar], begins: &[u32]) -> Vec<u8> {
+fn build_header(dims: &[NcDim], vars: &[NcVar], begins: &[u32]) -> Result<Vec<u8>, ExodusError> {
     let mut h = Vec::new();
     h.extend_from_slice(&[b'C', b'D', b'F', 1]);
     h.extend_from_slice(&to_u32(0)); // numrecs (no record variables)
@@ -187,14 +188,13 @@ fn build_header(dims: &[NcDim], vars: &[NcVar], begins: &[u32]) -> Vec<u8> {
         }
         h.extend_from_slice(&to_u32(0)); // number of attributes
         h.extend_from_slice(&to_u32(v.dtype));
-        // Safe: see note in `encode_nc3`; `dims`/`vars` are always valid here.
-        h.extend_from_slice(&to_u32(
-            vsize_of(dims, v).expect("encoded dimensions are always valid"),
-        ));
+        // `dims`/`vars` describe a mesh this crate just assembled, so `vsize_of`
+        // is effectively unreachable; surface it as an error regardless.
+        h.extend_from_slice(&to_u32(vsize_of(dims, v)?));
         h.extend_from_slice(&to_u32(begin));
     }
     h.extend_from_slice(&to_u32(0)); // NC_END
-    h
+    Ok(h)
 }
 
 /// Decode dimensions and variables from NetCDF-3 classic bytes.
@@ -382,12 +382,17 @@ fn exodus_name_to_cell(name: &str) -> Option<CellType> {
 
 /// Write a `Mesh` to an Exodus II file at `path`.
 pub fn write_exodus(mesh: &Mesh, path: impl AsRef<Path>) -> std::io::Result<()> {
-    let bytes = mesh_to_exodus_bytes(mesh);
+    let bytes = mesh_to_exodus_bytes(mesh)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     std::fs::write(path, bytes)
 }
 
 /// Serialise a `Mesh` to NetCDF-3 classic (Exodus II) bytes.
-pub fn mesh_to_exodus_bytes(mesh: &Mesh) -> Vec<u8> {
+///
+/// Returns an error instead of panicking if a variable's dimension product
+/// overflows a `u32` (unreachable for the meshes this crate builds, but kept
+/// panic-free for completeness).
+pub fn mesh_to_exodus_bytes(mesh: &Mesh) -> Result<Vec<u8>, ExodusError> {
     // Group elements by cell type into blocks.
     let mut block_order: Vec<CellType> = Vec::new();
     let mut block_elems: Vec<Vec<usize>> = Vec::new();
@@ -736,7 +741,7 @@ mod tests {
         b.add_element(CellType::Tri, vec![n0, n1, n2]);
         let mesh = b.build();
 
-        let bytes = mesh_to_exodus_bytes(&mesh);
+        let bytes = mesh_to_exodus_bytes(&mesh).unwrap();
         assert_eq!(&bytes[0..4], b"CDF\x01");
         let parsed = bytes_to_mesh(&bytes).unwrap();
         assert_eq!(parsed.node_count(), 3);
@@ -760,7 +765,7 @@ mod tests {
         b.add_element(CellType::Tri, vec![c, f, e]);
         let mesh = b.build();
 
-        let bytes = mesh_to_exodus_bytes(&mesh);
+        let bytes = mesh_to_exodus_bytes(&mesh).unwrap();
         let parsed = bytes_to_mesh(&bytes).unwrap();
         assert_eq!(parsed.element_count(), 3);
         let tri = parsed
@@ -817,7 +822,7 @@ mod tests {
         let n1 = b.add_node(vec![1.0, 0.0]);
         let n2 = b.add_node(vec![0.0, 1.0]);
         b.add_element(CellType::Tri, vec![n0, n1, n2]);
-        let bytes = mesh_to_exodus_bytes(&b.build());
+        let bytes = mesh_to_exodus_bytes(&b.build()).unwrap();
         // Locate the connect1 payload on disk and overwrite its first node id
         // (1-based) with 0, which underflows to usize::MAX when subtracted.
         let (_, vars) = decode_nc3(&bytes).unwrap();
@@ -839,7 +844,7 @@ mod tests {
         let n1 = b.add_node(vec![1.0, 0.0]);
         let n2 = b.add_node(vec![0.0, 1.0]);
         b.add_element(CellType::Tri, vec![n0, n1, n2]);
-        let bytes = mesh_to_exodus_bytes(&b.build());
+        let bytes = mesh_to_exodus_bytes(&b.build()).unwrap();
         // Overwrite the third (last) node id of the only element with 9, which
         // maps to 0-based node 8 and is out of range for a 3-node mesh.
         let (_, vars) = decode_nc3(&bytes).unwrap();
@@ -861,7 +866,7 @@ mod tests {
         let n1 = b.add_node(vec![1.0, 0.0]);
         let n2 = b.add_node(vec![0.0, 1.0]);
         b.add_element(CellType::Tri, vec![n0, n1, n2]);
-        let mut bytes = mesh_to_exodus_bytes(&b.build());
+        let mut bytes = mesh_to_exodus_bytes(&b.build()).unwrap();
         let name = [6u8, b'c', b'o', b'o', b'r', b'd', b's', 0];
         if let Some(p) = bytes.windows(name.len()).position(|w| w == name) {
             let dtype_pos = p + 8 + 4 + 8 + 4;

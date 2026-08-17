@@ -1,0 +1,41 @@
+# Example problem for the `tpt-fem` CLI.
+#
+# Run with:
+#   cargo run -p tpt-fem-cli -- solve path/to/poisson.toml
+#
+# Only the "poisson" (steady heat conduction / -∇·(k∇u) = f) problem type is
+# supported this pass. All sections other than [mesh] are optional and fall back
+# to sensible defaults (conductivity = 1, zero source, solution written to
+# solution.vtk).
+
+[problem]
+type = "poisson"
+
+[mesh]
+# 2-D structured box; or set `file = "mesh.msh"` to import a Gmsh mesh instead.
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+conductivity = 1.0
+
+[source]
+# Constant volumetric source f(x). (Callback/expression sources are not yet
+# supported by the CLI; use 0.0 for a pure Dirichlet/Laplace problem.)
+constant = 1.0
+
+# Boundary condition selectors (any combination may be used; all matching nodes
+# are constrained to `value`):
+#   nodes    = explicit node-id list
+#   plane    = all nodes with coordinate `coord` along `axis` (0=x,1=y,2=z)
+#   box_sel  = all nodes inside the axis-aligned box [min, max]
+#   region   = nodes tagged with Gmsh physical-group `region`
+#   boundary = all nodes on the mesh boundary (faces shared by ≤1 element)
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = "solution.vtk"

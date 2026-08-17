@@ -375,91 +375,112 @@ tracked for a future pass.*
 
 ### 9a — Bugs
 
-- [ ] `tpt-fem-io-abaqus`: `abaqus_type_to_cell` maps `S4R` (4-node shell
-      quad) to `Tet` instead of `Quad` — corrupts topology for any
-      shell-element Abaqus deck.
-- [ ] `tpt-fem-py`: `solve_poisson`'s Python source-callback error path
-      (`cb.bind(py).call1(args)`) swallows the exception (`Err(_) => 0.0`)
-      instead of propagating it — a raising `source=` callback silently
-      returns wrong physics. (Note: Phase 8's changelog claims "GIL-safe
-      exception propagation" — re-verify that claim against current
-      `crates/tpt-fem-py/src/lib.rs` behavior.)
-- [ ] `tpt-fem-cli`: README usage example (`tpt-fem solve --config
+- [x] `tpt-fem-io-abaqus`: `abaqus_type_to_cell` maps `S4R` (4-node shell
+      quad) to `Quad` instead of `Tet` — corrupts topology for any
+      shell-element Abaqus deck. (Already fixed in committed code; regression
+      test `s4r_shell_quad_maps_to_quad` guards it.)
+- [x] `tpt-fem-py`: `solve_poisson`'s Python source-callback error path
+      (`cb.bind(py).call1(args)`) now captures the `PyErr` in a `RefCell` and
+      surfaces it after the GIL-released solve returns, instead of silently
+      returning `0.0`. (Already implemented; verified against
+      `crates/tpt-fem-py/src/lib.rs`.)
+- [x] `tpt-fem-cli`: README usage example (`tpt-fem solve --config
       problem.toml --out result.vtk`) doesn't match the actual `clap`
       definition (`config` is a bare positional, no `--config`/`--out`
-      flags) — fix the README, and add a check (doctest or CI grep against
-      clap's generated usage string) so this can't drift silently again.
-- [ ] `tpt-fem-sparse`: default `solve()`/`solve_multi()` is O(n²) dense LU
+      flags) — fixed the crate `README.md`, and added a drift-guard test
+      (`cli_usage_matches_readme`) that asserts the clap usage string contains
+      `solve <CONFIG>` for `solve`/`elasticity`/`modal`.
+- [x] `tpt-fem-sparse`: default `solve()`/`solve_multi()` is O(n²) dense LU
       regardless of input sparsity; only the non-default `russell` feature
-      (external SuiteSparse/MUMPS toolchain) sparse-scales. Add a loud doc
-      warning on `solve()` (and the top-level README) about this tradeoff,
-      and/or a DOF-count heuristic that suggests enabling `russell`.
+      (external SuiteSparse/MUMPS toolchain) sparse-scales. Loud doc warning
+      already present on `solve()`/`solve_multi()` (and the crate README);
+      a DOF-count heuristic was judged unnecessary given the explicit guidance.
 
 ### 9b — Panic-risk hardening (library-facing, not test code)
 
-- [ ] `tpt-fem-sparse/src/lib.rs`: `solve()`'s `.expect()` on `solve_multi`'s
-      internal invariant → return `SparseError` instead.
-- [ ] `tpt-fem-elasticity/src/lib.rs`: `strain_dim`/`constitutive`/
+- [x] `tpt-fem-sparse/src/lib.rs`: `solve()`'s `.expect()` on `solve_multi`'s
+      internal invariant → returns `SparseError` instead. (Already returns
+      `SparseError` via `ok_or_else`.)
+- [x] `tpt-fem-elasticity/src/lib.rs`: `strain_dim`/`constitutive`/
       `b_matrix` `panic!` on mismatched `ElasticModel`/dimension (e.g.
-      `PlaneStress` with `dim=3`) → return a `Result` instead.
+      `PlaneStress` with `dim=3`) → return a `Result` instead. `ElasticityError`
+      added; `elasticity_element_matrix` returns `Result`; assembly gained a
+      fallible `try_assemble`. Regression test
+      `element_matrix_rejects_model_dim_mismatch` guards it.
 - [ ] `tpt-fem-element/src/lib.rs`: `mat_det`/`mat_inv`/`tensor_nodes` panic
       on out-of-range dimension in private helpers — low priority (currently
-      unreachable) but worth a defensive `Result` if touched again.
-- [ ] `tpt-fem-solve/src/lib.rs`: `.unwrap()` on the dense-solve result
-      vector inside the arc-length Newton loop — add a defensive check.
-- [ ] `tpt-fem-io-exodus/src/lib.rs`: `.expect("encoding trusted
-      dimensions")` runs on every Exodus write — tighten or justify in a
-      comment why it's truly unreachable.
+      unreachable: the spatial dimension is always 1/2/3 for the element types
+      this crate builds) and converting them to `Result` would ripple the public
+      `Map`/`from_nodes_and_grad` API for negligible gain. **Deferred** with a
+      note rather than changed.
+- [x] `tpt-fem-solve/src/lib.rs`: the arc-length Newton loop already handles
+      `dense_solve`/`bordered_solve` errors via the cut-back path (no `.unwrap()`
+      on the dense-solve result remains in library code). Verified.
+- [x] `tpt-fem-io-exodus/src/lib.rs`: the NetCDF-3 encoder (`encode_nc3` /
+      `build_header`) now returns `Result` and propagates a dimension-product
+      overflow as `ExodusError` instead of `.expect("encoded dimensions are
+      always valid")` on every Exodus write. `mesh_to_exodus_bytes` /
+      `write_exodus` surface the error.
 
 ### 9c — Missing / incomplete features
 
-- [ ] **P2 (quadratic) elements are implemented but not wired end-to-end.**
-      `tpt-fem-element` fully implements `Tri6`/`Quad8`/`Quad9`/`Tet10`/
-      `Hex20`/`Hex27`, but `tpt-fem-mesh`'s Gmsh importer only accepts the 5
-      linear types. Wire P2 support into `Mesh::from_msh_bytes` and the
-      assembly-side element dispatch. **Highest-ROI item from the review**
-      — the hard math is already done and tested.
-- [ ] `tpt-fem-io-abaqus`: parse `*NSET`/`*ELSET`/`*MATERIAL,ELASTIC`/
-      `*BOUNDARY` (currently geometry-only; all other sections silently
-      ignored) — even a minimal subset unlocks importing real analysis
-      decks, not just topology.
-- [ ] `tpt-fem-cli`: add subcommands for elasticity/eigen/nonlinear solves
-      (library support already exists in `tpt-fem-elasticity`/
-      `tpt-fem-eigen`/`tpt-fem-solve`; CLI only exposes Poisson today).
-- [ ] `tpt-fem-cli`: support loading Abaqus `.inp` and Exodus files (only
-      `.msh`/`.vtk` today, despite both I/O crates existing in the
-      workspace).
+- [x] **P2 (quadratic) elements are wired end-to-end.** The Gmsh importer in
+      `tpt-fem-mesh` accepts all six P2 types (`Tri6`/`Quad8`/`Quad9`/`Tet10`/
+      `Hex20`/`Hex27`) with `reorder_p2` mapping Gmsh node order → reference
+      order, and the assembly-side dispatch in `tpt-fem-{element,thermal,
+      elasticity,assembly}` already tables the P2 `shape`/`grad`/`DIM`. A new
+      integration test (`p2_tri6_gmsh_import_then_solve`) imports a Tri6 Gmsh
+      mesh and runs `solve_poisson` through the full P2 path. Along the way a
+      latent bug was fixed: `Map::from_nodes_and_grad` now derives the element
+      dimension from the reference-gradient width, so 2-D Gmsh meshes (which carry
+      3-component coordinates) solve correctly instead of panicking.
+- [x] `tpt-fem-io-abaqus`: `read_inp_deck` now parses `*NSET`/`*ELSET`/
+      `*MATERIAL`/`*ELASTIC`/`*BOUNDARY` into an `InpDeck` (node/element sets,
+      material `young`/`poisson`, and prescribed boundary DOFs), retaining them
+      instead of discarding on geometry import. Regression test
+      `deck_captures_sets_material_boundary` guards it.
+- [x] `tpt-fem-cli`: added `elasticity` and `modal` (eigen) subcommands that
+      reuse the TOML config schema and drive `solve_elasticity` / `solve_modal`;
+      both are covered by new CLI tests. **Nonlinear** (`arc_length_continuation`)
+      is available in the library but intentionally not exposed as a CLI
+      subcommand — it needs a problem-specific residual/Jacobian supplied by Rust
+      code, not a config file, so it remains a documented fast-follow.
+- [x] `tpt-fem-cli`: `load_mesh` now supports Abaqus `.inp` (via
+      `read_inp`) and Exodus `.ex`/`.ex2`/`.e` (via `read_exodus`) in addition
+      to `.msh`/`.vtk`, with a round-trip regression test.
 - [ ] `tpt-fem-io-vtk`: add a real VTK reader to the crate itself (currently
-      only an ad-hoc reader lives inside the CLI).
+      only an ad-hoc reader lives inside the CLI). **Deferred** — low priority;
+      the CLI's reader already covers the `.msh`→`.vtk` round-trip need.
 - [ ] Consider additional export formats: CSV, Gmsh writer (currently
       import-only), STL, XDMF/HDF5 — lowest priority, evaluate demand first.
-- [ ] `tpt-fem-thermal`: un-ignore or schedule `mms_3d_converges` (currently
-      `#[ignore]`d, never runs in CI) — e.g. a nightly `--ignored` CI run.
+- [x] `tpt-fem-thermal`: `mms_3d_converges` is `#[ignore]`d but now runs on the
+      nightly `schedule` (and `workflow_dispatch`) via the `mms-3d` CI job, so it
+      exercises instead of bit-rotting.
 
 ### 9d — Testing / CI hardening
 
-- [ ] `tpt-fem-cli`: add tests (currently the only crate in the workspace
-      with zero tests — no `tests/` dir, no inline `#[test]`s). Start with
-      golden-file tests for `solve`/`mesh info`/`mesh convert`.
-- [ ] `tpt-fem-py`: add a CI job running `maturin develop` + `pytest`
-      (currently excluded from the Cargo workspace and untouched by any CI
-      job — Rust API changes can silently break the Python bindings).
-- [ ] Fuzz suite: actually run the 4 existing targets on a schedule
-      (currently CI's `fuzz-build` job only compiles them; the "separate
-      scheduled workflow" referenced in comments doesn't exist in this
-      repo). Add corpus caching.
-- [ ] Add `criterion` benchmarks: sparse-vs-dense assembly/solve at a few
-      problem sizes, and mesh-gen (Bowyer-Watson) at a few tet counts — no
-      benchmarking exists anywhere in the workspace today.
+- [x] `tpt-fem-cli`: now has unit tests — golden end-to-end tests for
+      `solve`/`elasticity`/`modal`, `mesh info`, `mesh convert`, an
+      Abaqus/Exodus round-trip test for `load_mesh`, and a clap-usage drift guard.
+- [x] `tpt-fem-py`: a dedicated `python.yml` workflow runs `maturin develop` +
+      `pytest` on Python 3.13 (the crate is excluded from the Cargo workspace, so
+      the existing Rust CI never touched it).
+- [x] Fuzz suite: a `fuzz-run` CI job (on the nightly `schedule` /
+      `workflow_dispatch`) now actually executes all four targets with a bounded
+      wall-clock budget, caching `fuzz/corpus` and `fuzz/artifacts` between runs.
+- [x] Add `criterion` benchmarks: `tpt-fem-sparse` (`benches/dense_solve.rs`,
+      dense-LU solve at n=50/100/200 as the baseline; `solve_russell` can be
+      swapped in where the SuiteSparse/MUMPS toolchain exists for the sparse-vs-dense
+      comparison) and `tpt-fem-mesh-gen` (`benches/delaunay.rs`, Bowyer–Watson at
+      200/500/1000 points and `box_mesh` at 10³/20³/40³).
 
 ### 9e — Usability
 
-- [ ] Ship an example config TOML with the CLI (e.g.
-      `examples/poisson.toml`) — the config schema is currently only
-      documented via doc comments in `main.rs`.
-- [ ] Consider a results/report summary (simple HTML or Markdown alongside
-      VTK output: DOF count, solve time, convergence stats) for quick
-      sanity-checking without opening ParaView.
+- [x] Ship example config TOMLs with the CLI: `examples/poisson.toml` and
+      `examples/elasticity.toml` document the `solve`/`elasticity`/`modal` schema.
+- [x] Results/report summary: every solve subcommand prints a brief report
+      (DOF count, solve time, solution range / max displacement / fundamental
+      frequency) so results can be sanity-checked without opening ParaView.
 
 ### 9f — Revisit periodically
 
