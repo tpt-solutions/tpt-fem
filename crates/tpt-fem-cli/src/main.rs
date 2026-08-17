@@ -14,12 +14,12 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use tpt_fem::{
-    boundary_faces, box_mesh, read_exodus, read_inp, solve_elasticity, solve_modal, solve_poisson,
-    write_vtk, write_vtk_with_data, CellType, ElasticModel, Mesh, MeshBuilder, MeshError,
-    PointData,
+    boundary_faces, box_mesh, read_exodus, read_inp, read_vtk, solve_elasticity, solve_modal,
+    solve_poisson, write_vtk, write_vtk_with_data, CellType, ElasticModel, Error, Mesh,
+    MeshBuilder, PointData,
 };
 
-type Err = Box<dyn std::error::Error>;
+type Err = Error;
 
 // ---------------------------------------------------------------------------
 // CLI surface
@@ -48,6 +48,15 @@ enum Command {
     Modal {
         /// Path to the TOML problem description.
         config: PathBuf,
+    },
+    /// Generate a starter `problem.toml` for a chosen problem type.
+    Init {
+        /// Problem type: `poisson`, `elasticity`, or `modal`.
+        #[arg(default_value = "poisson")]
+        problem: String,
+        /// Output config path.
+        #[arg(default_value = "problem.toml")]
+        output: PathBuf,
     },
     /// Mesh inspection and conversion utilities.
     Mesh {
@@ -203,7 +212,7 @@ struct BoxSel {
 
 #[derive(Deserialize)]
 struct Bc {
-    /// Prescribed value (Dirichlet, this pass).
+    /// Prescribed value (Dirichlet).
     value: f64,
     #[serde(default)]
     nodes: Option<Vec<usize>>,
@@ -215,6 +224,22 @@ struct Bc {
     region: Option<i32>,
     #[serde(default)]
     boundary: bool,
+    /// Which displacement/DOF components to constrain (0-based). Defaults to
+    /// *all* components of the problem's spatial dimension. This is ignored for
+    /// scalar (Poisson) problems, which have a single DOF per node. For vector
+    /// problems it lets you pin only, say, the x-component (`[0]`) of a node
+    /// while leaving the others free.
+    #[serde(default)]
+    dofs: Option<Vec<usize>>,
+}
+
+/// A resolved boundary-condition hit on a single node, retaining the optional
+/// per-component DOF mask so vector solvers can constrain selected components
+/// rather than the whole node.
+struct BcHit {
+    node: usize,
+    value: f64,
+    dofs: Option<Vec<usize>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +259,7 @@ fn run() -> Result<(), Err> {
         Command::Solve { config } => solve_config(&config),
         Command::Elasticity { config } => solve_config(&config),
         Command::Modal { config } => solve_config(&config),
+        Command::Init { problem, output } => init_config(&problem, &output),
         Command::Mesh { action } => match action {
             MeshAction::Info { file } => mesh_info(&file),
             MeshAction::Convert { input, output } => mesh_convert(&input, &output),
@@ -345,8 +371,9 @@ fn cell_face_nodes(cell: CellType, fi: usize) -> &'static [usize] {
     }
 }
 
-/// Expand a boundary condition into a `(node, value)` list.
-fn bc_nodes(mesh: &Mesh, bc: &Bc) -> Vec<(usize, f64)> {
+/// Expand a boundary condition into a list of per-node [`BcHit`]s (carrying the
+/// optional per-component DOF mask from `bc.dofs`).
+fn bc_nodes(mesh: &Mesh, bc: &Bc) -> Vec<BcHit> {
     let mut ids: Vec<usize> = Vec::new();
     if let Some(list) = &bc.nodes {
         ids.extend(list.iter().copied());
@@ -376,12 +403,109 @@ fn bc_nodes(mesh: &Mesh, bc: &Bc) -> Vec<(usize, f64)> {
             }
         }
     }
-    ids.into_iter().map(|id| (id, bc.value)).collect()
+    ids.into_iter()
+        .map(|id| BcHit {
+            node: id,
+            value: bc.value,
+            dofs: bc.dofs.clone(),
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
 // Subcommands
 // ---------------------------------------------------------------------------
+
+/// Starter `problem.toml` templates, keyed by problem type.
+const POISSON_TEMPLATE: &str = "\
+[problem]
+type = \"poisson\"
+
+[mesh]
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+conductivity = 1.0
+
+[source]
+constant = 1.0
+
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = \"solution.vtk\"
+";
+
+const ELASTICITY_TEMPLATE: &str = "\
+[problem]
+type = \"elasticity\"
+model = \"plane-stress\"
+
+[mesh]
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+young   = 1.0
+poisson = 0.3
+
+# Pin selected DOFs with `dofs = [0]` etc.; omit to fix every component.
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = \"displacement.vtk\"
+";
+
+const MODAL_TEMPLATE: &str = "\
+[problem]
+type = \"modal\"
+model = \"plane-stress\"
+num_modes = 4
+
+[mesh]
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+young   = 1.0
+poisson = 0.3
+density = 1.0
+
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = \"mode1.vtk\"
+";
+
+/// Generate a starter problem config for `problem` and write it to `output`.
+fn init_config(problem: &str, output: &PathBuf) -> Result<(), Err> {
+    let body = match problem.to_ascii_lowercase().as_str() {
+        "elasticity" => ELASTICITY_TEMPLATE,
+        "modal" => MODAL_TEMPLATE,
+        "poisson" => POISSON_TEMPLATE,
+        other => {
+            return Err(Error::Msg(format!(
+                "unknown problem type '{other}' (supported: poisson, elasticity, modal)"
+            )));
+        }
+    };
+    std::fs::write(output, body)?;
+    println!("Wrote starter '{problem}' config to {}", output.display());
+    Ok(())
+}
 
 fn solve_config(path: &PathBuf) -> Result<(), Err> {
     let text = std::fs::read_to_string(path)?;
@@ -394,17 +518,20 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
         mesh.element_count()
     );
 
-    let mut bcs = Vec::new();
+    let mut hits = Vec::new();
     for bc in &cfg.bc {
-        bcs.extend(bc_nodes(&mesh, bc));
+        hits.extend(bc_nodes(&mesh, bc));
     }
-    println!("Applied {} Dirichlet conditions", bcs.len());
+    println!("Applied {} Dirichlet conditions", hits.len());
 
     let vtk = &cfg.output.vtk;
     match cfg.problem.r#type.as_str() {
         "poisson" => {
             let f = cfg.source.constant;
             let ndof = mesh.node_count();
+            // Scalar problem: one DOF per node, so the per-component `dofs`
+            // mask is irrelevant here.
+            let bcs: Vec<(usize, f64)> = hits.iter().map(|h| (h.node, h.value)).collect();
             let t0 = Instant::now();
             let u = solve_poisson(
                 &mesh,
@@ -428,9 +555,7 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
         "elasticity" => {
             let model = parse_model(&cfg.problem.model)?;
             let dim = cell_dim(mesh.elements[0].cell_type);
-            // Fully fix every DOF of each selected node (a richer per-component
-            // constraint schema is a future extension).
-            let dir = expand_dirichlet(&bcs, dim);
+            let dir = expand_dirichlet(&hits, dim);
             let ndof = mesh.node_count() * dim;
             let t0 = Instant::now();
             let u = solve_elasticity(
@@ -453,7 +578,7 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
         "modal" => {
             let model = parse_model(&cfg.problem.model)?;
             let dim = cell_dim(mesh.elements[0].cell_type);
-            let dir = expand_dirichlet(&bcs, dim);
+            let dir = expand_dirichlet(&hits, dim);
             let ndof = mesh.node_count() * dim;
             let t0 = Instant::now();
             let modes = solve_modal(
@@ -479,10 +604,9 @@ fn solve_config(path: &PathBuf) -> Result<(), Err> {
             write_vtk_with_data(&mesh, &[PointData::new("mode1", shape)], vtk)?;
         }
         other => {
-            return Err(format!(
+            return Err(Error::Msg(format!(
                 "unsupported problem type '{other}' (supported: poisson, elasticity, modal)"
-            )
-            .into());
+            )));
         }
     }
     println!("Wrote {}", vtk.display());
@@ -505,17 +629,23 @@ fn parse_model(s: &str) -> Result<ElasticModel, Err> {
         "planestress" => Ok(ElasticModel::PlaneStress),
         "planestrain" => Ok(ElasticModel::PlaneStrain),
         "3d" | "continuum" | "continuum3d" => Ok(ElasticModel::Continuum3D),
-        other => Err(format!("unknown elasticity model '{other}'").into()),
+        other => Err(Error::Msg(format!("unknown elasticity model '{other}"))),
     }
 }
 
-/// Expand per-node Dirichlet conditions into per-DOF `(global_dof, value)`
-/// pairs, constraining all `dim` components of each selected node.
-fn expand_dirichlet(bcs: &[(usize, f64)], dim: usize) -> Vec<(usize, f64)> {
+/// Expand resolved BC hits into per-DOF `(global_dof, value)` pairs for a
+/// `dim`-component vector problem. A hit without an explicit `dofs` mask
+/// constrains every component of the node; otherwise only the listed
+/// components (clamped to `[0, dim)`) are fixed.
+fn expand_dirichlet(hits: &[BcHit], dim: usize) -> Vec<(usize, f64)> {
     let mut dir = Vec::new();
-    for (node, val) in bcs {
-        for c in 0..dim {
-            dir.push((node * dim + c, *val));
+    for h in hits {
+        let comps: Vec<usize> = match &h.dofs {
+            Some(v) => v.iter().copied().filter(|&c| c < dim).collect(),
+            None => (0..dim).collect(),
+        };
+        for c in comps {
+            dir.push((h.node * dim + c, h.value));
         }
     }
     dir
@@ -577,7 +707,8 @@ fn mesh_convert(input: &PathBuf, output: &PathBuf) -> Result<(), Err> {
     Ok(())
 }
 
-/// Load a mesh: `.msh` (Gmsh) or `.vtk` (re-imported through vtkio).
+/// Load a mesh: `.msh` (Gmsh), `.inp` (Abaqus), `.ex`/`.ex2`/`.e` (Exodus), or
+/// `.vtk` (re-imported through `tpt-fem-io-vtk`'s reader).
 fn load_mesh(path: &PathBuf) -> Result<Mesh, Err> {
     let ext = path
         .extension()
@@ -589,75 +720,21 @@ fn load_mesh(path: &PathBuf) -> Result<Mesh, Err> {
             let bytes = std::fs::read(path)?;
             Ok(Mesh::from_msh_bytes(&bytes)?)
         }
-        "vtk" => {
-            let vtk = vtkio::model::Vtk::import(path)
-                .map_err(|e| MeshError::Parse(format!("vtk import: {e}")))?;
-            mesh_from_vtk(&vtk)
-        }
-        // Abaqus input deck (geometry + the `*NSET`/`*ELSET`/`*MATERIAL`/
-        // `*BOUNDARY` sections). See `tpt-fem-io-abaqus`.
         "inp" => {
             let text = std::fs::read_to_string(path)?;
-            Ok(read_inp(&text).map_err(|e| format!("abaqus import: {e}"))?)
+            Ok(read_inp(&text).map_err(|e| Error::Msg(format!("abaqus import: {e}")))?)
         }
         // Exodus II (NetCDF-3) mesh.
-        "ex" | "ex2" | "e" => Ok(read_exodus(path).map_err(|e| format!("exodus import: {e}"))?),
-        other => Err(format!(
-            "unsupported mesh extension '.{other}' (use .msh, .vtk, .inp, or .ex)"
-        )
-        .into()),
+        "ex" | "ex2" | "e" => {
+            Ok(read_exodus(path).map_err(|e| Error::Msg(format!("exodus import: {e}")))?)
+        }
+        // VTK (re-imported through `tpt-fem-io-vtk`'s crate-level reader,
+        // promoted out of the CLI in Phase 10c).
+        "vtk" => Ok(read_vtk(path).map_err(|e| Error::Msg(format!("vtk import: {e}")))?),
+        other => Err(Error::Msg(format!(
+            "unsupported mesh extension '.{other}' (use .msh, .inp, .ex, or .vtk)"
+        ))),
     }
-}
-
-/// Minimal VTK → Mesh reader for the linear cell types this crate writes.
-fn mesh_from_vtk(vtk: &vtkio::model::Vtk) -> Result<Mesh, Err> {
-    use vtkio::model::{DataSet, Piece};
-    let ds = &vtk.data;
-    let (points, cells) = match ds {
-        DataSet::UnstructuredGrid { pieces, .. } => match &pieces[0] {
-            Piece::Inline(p) => {
-                let pts = match &p.points {
-                    vtkio::model::IOBuffer::F64(v) => v.clone(),
-                    _ => return Err("unsupported point coordinate type".into()),
-                };
-                (pts, p.cells.clone())
-            }
-            _ => return Err("expected inline VTK piece".into()),
-        },
-        _ => return Err("expected unstructured grid".into()),
-    };
-    let np = points.len() / 3;
-    let mut b = MeshBuilder::new();
-    for i in 0..np {
-        b.add_node(vec![points[3 * i], points[3 * i + 1], points[3 * i + 2]]);
-    }
-    let verts = match &cells.cell_verts {
-        vtkio::model::VertexNumbers::Legacy { vertices, .. } => vertices.clone(),
-        _ => return Err("unsupported cell numbering".into()),
-    };
-    let mut i = 0;
-    while i < verts.len() {
-        let cnt = verts[i] as usize;
-        let cell = match cnt {
-            2 => CellType::Line,
-            3 => CellType::Tri,
-            4 => CellType::Quad,
-            6 => CellType::Tri6,
-            8 => CellType::Hex,
-            9 => CellType::Quad9,
-            10 => CellType::Tet10,
-            20 => CellType::Hex20,
-            27 => CellType::Hex27,
-            _ => return Err(format!("unsupported cell with {cnt} nodes").into()),
-        };
-        let nodes = verts[i + 1..i + 1 + cnt]
-            .iter()
-            .map(|&v| v as usize)
-            .collect();
-        b.add_element(cell, nodes);
-        i += 1 + cnt;
-    }
-    Ok(b.build())
 }
 
 #[cfg(test)]
@@ -785,6 +862,37 @@ $EndElements
         }
         // And the bare-positional form must actually parse.
         Cli::command().debug_assert()
+    }
+
+    #[test]
+    fn expand_dirichlet_honors_dof_mask() {
+        // Per-component Dirichlet: node 0 pinned in x only (dofs=[0]); node 1
+        // pinned in every component (default). The expansion must constrain
+        // exactly the listed global DOFs.
+        let hits = vec![
+            BcHit {
+                node: 0,
+                value: 0.0,
+                dofs: Some(vec![0]),
+            },
+            BcHit {
+                node: 1,
+                value: 0.0,
+                dofs: None,
+            },
+        ];
+        let dir = expand_dirichlet(&hits, 2);
+        assert!(dir.contains(&(0, 0.0))); // node 0, dof x
+        assert!(!dir.contains(&(1, 0.0))); // node 0, dof y must NOT be fixed
+        assert!(dir.contains(&(2, 0.0))); // node 1, dof x
+        assert!(dir.contains(&(3, 0.0))); // node 1, dof y
+                                          // Out-of-range components are clamped to [0, dim).
+        let hits2 = vec![BcHit {
+            node: 2,
+            value: 0.0,
+            dofs: Some(vec![0, 5]),
+        }];
+        assert_eq!(expand_dirichlet(&hits2, 2), vec![(4, 0.0)]);
     }
 
     #[test]

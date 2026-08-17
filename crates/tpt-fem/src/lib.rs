@@ -26,6 +26,14 @@
 //! The end-to-end pipeline — reference-element shape functions and gradients,
 //! quadrature, triplet assembly, and a sparse solve — is exercised by the
 //! integration test `tests/patch_test.rs`.
+//!
+//! # Error handling
+//!
+//! This crate also provides a unified [`Error`] type that aggregates the
+//! per-crate error enums (plus `std::io::Error` and TOML deserialization
+//! errors) behind `#[from]` conversions, so consumers such as the CLI can use a
+//! single error type instead of threading `Box<dyn std::error::Error>`.
+
 #![cfg_attr(
     not(feature = "quadrature"),
     doc = "The `quadrature` feature is disabled; `tpt_fem_quadrature` is not re-exported."
@@ -78,6 +86,48 @@
     not(feature = "mesh-gen"),
     doc = "The `mesh-gen` feature is disabled; `tpt_fem_mesh_gen` is not re-exported."
 )]
+
+/// Unified error type for the `tpt-fem` umbrella and its consumers.
+///
+/// Each per-crate error type is forwarded via `#[from]` (gated behind the
+/// corresponding Cargo feature), alongside `std::io::Error`, TOML config errors,
+/// and a generic message variant for ad-hoc CLI diagnostics.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Held when a per-crate error type is unavailable (feature disabled).
+    #[error("{0}")]
+    Msg(String),
+    /// I/O failure (file read/write, import/export).
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// TOML problem-config parse failure.
+    #[error("config error: {0}")]
+    Config(#[from] toml::de::Error),
+    /// `tpt-fem-mesh` error (validation, import, selectors).
+    #[cfg(feature = "mesh")]
+    #[error(transparent)]
+    Mesh(#[from] tpt_fem_mesh::MeshError),
+    /// `tpt-fem-sparse` solver error.
+    #[cfg(feature = "sparse")]
+    #[error(transparent)]
+    Sparse(#[from] tpt_fem_sparse::SparseError),
+    /// `tpt-fem-io-abaqus` parser error.
+    #[cfg(feature = "io-abaqus")]
+    #[error(transparent)]
+    Inp(#[from] tpt_fem_io_abaqus::InpError),
+    /// `tpt-fem-io-exodus` codec error.
+    #[cfg(feature = "io-exodus")]
+    #[error(transparent)]
+    Exodus(#[from] tpt_fem_io_exodus::ExodusError),
+    /// `tpt-fem-io-vtk` reader/writer error.
+    #[cfg(feature = "io-vtk")]
+    #[error(transparent)]
+    Vtk(#[from] tpt_fem_io_vtk::VtkError),
+    /// `tpt-fem-solve` nonlinear/continuation error.
+    #[cfg(feature = "solve")]
+    #[error(transparent)]
+    Newton(#[from] tpt_fem_solve::NewtonError),
+}
 
 #[cfg(feature = "assembly")]
 pub use tpt_fem_assembly::*;

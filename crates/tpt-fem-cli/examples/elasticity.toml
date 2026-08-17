@@ -30,6 +30,13 @@ poisson = 0.3
 
 # Fully fix every DOF of each selected node. Here the whole boundary is clamped
 # (zero displacement), so with no body load the solution is u = 0.
+#
+# To constrain only specific components instead, add a `dofs` list (0-based):
+#   [[bc]]
+#   value = 0.0
+#   plane = { axis = 0, coord = 0.0 }
+#   dofs  = [0]            # pin only the x-component; y stays free
+# Omit `dofs` to fix all components (the default).
 [[bc]]
 value = 0.0
 boundary = true

@@ -247,7 +247,20 @@ fn dlag2(x: f64, at: f64) -> f64 {
 
 /// Reference node list for `Quad9`/`Hex27`: the tensor product of
 /// `{-1, 0, 1}` over the element's spatial dimension.
+///
+/// # Panics
+///
+/// Panics (in debug and release builds) if `dim` is not `2` or `3`. This is a
+/// contracted precondition: the only reference elements that call
+/// `tensor_nodes` are `Quad9`/`Hex27`, whose spatial dimension is always 2/3.
+/// See also the Phase 9b / 10a hardening notes in `todo.md`; converting this
+/// to a `Result` was intentionally deferred because the public `Map` /
+/// `from_nodes_and_grad` API would otherwise ripple for negligible gain.
 fn tensor_nodes(dim: usize) -> Vec<Vec<f64>> {
+    debug_assert!(
+        dim == 2 || dim == 3,
+        "tensor_nodes: unsupported dimension {dim} (only 2 or 3 are valid)"
+    );
     let levels = [-1.0_f64, 0.0, 1.0];
     let mut v = Vec::new();
     match dim {
@@ -589,7 +602,20 @@ fn hex20_grad_at(n: &[f64], x: f64, y: f64, z: f64) -> Vec<f64> {
 }
 
 /// Determinant of an `n×n` matrix stored row-major in a flat slice.
+///
+/// # Panics
+///
+/// Panics if `n` is not `1`, `2`, or `3`. This is a contracted precondition:
+/// every `Map`/`from_nodes_and_grad` instance in this crate has a known spatial
+/// dimension of 1/2/3, so an out-of-range `n` is unreachable in practice. See
+/// the Phase 9b / 10a notes in `todo.md` — converting this (and `mat_inv`) to a
+/// `Result` was deferred because it would ripple the public Jacobian API for
+/// negligible gain.
 fn mat_det(n: usize, m: &[f64]) -> f64 {
+    debug_assert!(
+        (1..=3).contains(&n),
+        "mat_det: unsupported dimension {n} (only 1, 2, or 3 are valid)"
+    );
     match n {
         1 => m[0],
         2 => m[0] * m[3] - m[1] * m[2],
@@ -602,7 +628,17 @@ fn mat_det(n: usize, m: &[f64]) -> f64 {
 }
 
 /// Inverse of an `n×n` matrix stored row-major, returned row-major.
+///
+/// # Panics
+///
+/// Panics if `n` is not `1`, `2`, or `3` (a contracted precondition; see the
+/// `mat_det` doc note for the rationale and the deferred Phase 9b / 10a
+/// conversion-to-`Result` discussion in `todo.md`).
 fn mat_inv(n: usize, m: &[f64]) -> Vec<f64> {
+    debug_assert!(
+        (1..=3).contains(&n),
+        "mat_inv: unsupported dimension {n} (only 1, 2, or 3 are valid)"
+    );
     match n {
         1 => vec![1.0 / m[0]],
         2 => {

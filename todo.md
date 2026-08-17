@@ -488,3 +488,116 @@ tracked for a future pass.*
       0194/0195) for vtkio-transitive deps, justified as "doesn't apply to
       trusted-read/write usage." Reasonable today; revisit if VTK files are
       ever accepted from untrusted/user-uploaded sources.
+
+---
+
+## Phase 10 — Platform Review Follow-ups (2026-08-18)
+
+*A second platform review (bugs/missing features/innovation/usability/
+adoption) on 2026-08-18 found the items below, layered on top of the
+still-open Phase 9 items above. Nothing here has been implemented yet —
+tracked for a future pass.*
+
+### 10a — Bugs / hardening
+
+- [x] `tpt-fem-element`: add a `debug_assert!` + doc note on `mat_det`/
+       `mat_inv`/`tensor_nodes` documenting the out-of-range-dimension panic
+       contract, since Phase 9b deferred converting them to `Result`.
+- [x] Drop the stale `faer` wasm-risk note for `tpt-fem-sparse` — the default
+       backend was already swapped to the in-house dense LU (Phase 1d
+       follow-up). Fixed the actual stale references in
+       `crates/tpt-fem/README.md` (s/`faer` solve/→ in-house dense-LU solve) and
+       the `wasm` CI job comment; the root README carried no `faer` note.
+- [x] `tpt-fem-io-exodus`: spot-verify Phase 9b's panic-hardening claim
+       specifically against the hand-rolled NetCDF-3 codec — done. Verified:
+       `encode_nc3` / `build_header` / `vsize_of` / `mesh_to_exodus_bytes` all
+       return `Result<_, ExodusError>`; the dimension-product overflow is caught
+       by `checked_mul` → `ExodusError::Parse` (no `.expect("encoded dimensions
+       are always valid")` remains); `sane_count` guards untrusted counts;
+       `write_exodus` surfaces `io::Result`. The only `.unwrap()` left in the
+       file are in unit tests (trusted in-memory round-trips).
+
+### 10b — Missing features
+
+- [x] `tpt-fem-cli`: per-component Dirichlet BCs (currently only all-DOF
+       fixing is supported) — real limitation for elasticity users, noted
+       only in a code comment today. `Bc` now carries an optional `dofs`
+       selector (0-based component list; defaults to all components), and
+       `expand_dirichlet` constrains only the listed (clamped to `[0, dim)`)
+       components. Documented in `examples/{poisson,elasticity}.toml` and
+       guarded by `expand_dirichlet_honors_dof_mask`. (Poisson remains
+       scalar/ignores `dofs`.)
+- [x] `tpt-fem-py`: extend Python bindings to `solve_elasticity`,
+       `solve_modal`, and eigen solve — currently Poisson/thermal only, the
+       biggest gap between what the Rust core can do and what's reachable
+       without writing Rust. `solve_elasticity(mesh, model, young, poisson,
+       quad_order, bcs)` and `solve_modal(mesh, model, young, poisson, density,
+       quad_order, num_modes, bcs)` are now exposed (BCs are `(node, component,
+       value)` tuples; `solve_modal` returns a list of `(ω², mode_shape)`). The
+       pre-existing `solve_poisson` callback-error capture was also hardened to
+       `Arc<Mutex<…>>` so the closure is `Send` under `allow_threads`. Validated
+       with `maturin develop` + `pytest` (4 tests pass on CPython 3.13), and
+       documented in the crate README.
+- [x] Consider a shared `thiserror`-based base error (or a single
+       `tpt_fem::Error` umbrella enum with `#[from]` conversions) to reduce
+       the `Box<dyn Error>` glue currently needed by CLI/umbrella consumers.
+       Implemented: `tpt-fem` now exposes `tpt_fem::Error` (thiserror-based)
+       aggregating each per-crate error (`Mesh`/`Sparse`/`Inp`/`Exodus`/`Vtk`/
+       `Newton`, each gated behind its feature) plus `std::io::Error`, TOML
+       config errors, and a `Msg` variant. The CLI switched from
+       `Box<dyn std::error::Error>` to `tpt_fem::Error`; all its `?` sites
+       convert via the `#[from]` impls. Verified with `cargo build --workspace`,
+       `--no-default-features` umbrella build, `clippy -D warnings`, and
+       `cargo fmt --check` (all clean).
+
+### 10c — Innovative / high-leverage additions
+
+- [x] `tpt-fem-io-vtk`: promote the CLI's ad-hoc VTK reader into the crate
+       itself (closes the Phase 9c layering gap and unlocks VTK round-tripping
+       from Python/umbrella, not just the CLI). `tpt-fem-io-vtk` now exposes
+       `read_vtk(path)` and `mesh_from_vtk(&Vtk)` (returning `Result<Mesh,
+       VtkError>`; the `VtkError` enum gained a `Parse` variant). The CLI's
+       local `mesh_from_vtk` was removed and `load_mesh`'s `.vtk` branch now
+       uses the crate-level reader; `vtkio` was dropped from the CLI deps. A
+       round-trip test (`read_vtk_round_trips_mesh`) and the existing
+       `mesh_convert` test exercise it.
+- [ ] `tpt-fem-py`: Jupyter-friendly result objects (`__repr__`/
+      `_repr_html_`, `to_pyvista()`/`to_numpy()` helpers) once elasticity/modal
+      bindings land, so results plug into PyVista/matplotlib without manual
+      VTK export/reimport round-trips.
+- [ ] `tpt-fem-cli`: `tpt-fem init` scaffolding subcommand that generates a
+      starter `problem.toml` + minimal mesh for a chosen problem type
+      (poisson/elasticity/modal).
+- [ ] CI: track `criterion` bench output over time (e.g.
+      `github-action-benchmark`-style regression tracking) instead of local/
+      ad hoc results only.
+
+### 10d — Usability / automation
+
+- [x] Add a root `CONTRIBUTING.md` documenting the `Justfile` commands,
+       crate-DAG conventions, and the `todo.md`/Phase workflow.
+- [ ] Extend the `cli_usage_matches_readme` drift-guard pattern to the
+      Python README's usage snippet (nothing currently enforces it still
+      compiles/runs against the bound API).
+- [ ] Add a `vtk_import` fuzz target once a real VTK reader lands per 10c.
+- [ ] Add a gated (manual/`workflow_dispatch`, not auto-run) `maturin
+      publish` GitHub Action for `tpt-fem-py` — `pyproject.toml` is already
+      PyPI-shaped but nothing publishes it.
+
+### 10e — Adoption: examples, templates, onboarding
+
+- [x] Add one runnable Rust example per major capability under
+       `crates/tpt-fem/examples/` (`elasticity_frame.rs`, `modal_analysis.rs`,
+       `mesh_gen_box.rs`, `abaqus_import.rs`), mirroring the existing
+       `thermal_solve.rs`. All four build and run; `elasticity_frame` matches
+       the analytical tip deflection and `modal_analysis` yields positive,
+       increasing natural frequencies.
+- [ ] Add a `crates/tpt-fem-py/examples/` directory (or notebook) walking
+      through mesh load → solve → VTK export → visualize.
+- [ ] Stand up a minimal docs site (e.g. `mdbook`) or a linked root `docs/`
+      folder consolidating the 15 per-crate READMEs into one browsable
+      narrative — currently no single entry point exists.
+- [x] Add a "Getting Started" section to the root README showing
+       `git clone` → `cargo run --example thermal_solve` → expected output,
+       since crates.io/PyPI publishing remain out of scope and every
+       adoption path starts with a clone today.

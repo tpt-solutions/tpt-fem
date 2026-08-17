@@ -55,8 +55,11 @@ jobs:
       - run: cargo doc --workspace --no-deps --all-features
 
   # wasm32 target check. The pure-math crates (quadrature/element/mesh) must
-  # build cleanly for wasm32; sparse is allowed to soft-fail pending
-  # confirmation of the faer -> rayon wasm32 compatibility risk.
+  # build cleanly for wasm32. The `tpt-fem-sparse` crate is allowed to
+  # soft-fail: its default solve backend is an in-house dense LU with no
+  # external dependencies, but the optional `russell` feature pulls in a
+  # native SuiteSparse/MUMPS toolchain that is not expected to build for
+  # wasm32 out of the box.
   wasm:
     runs-on: ubuntu-latest
     steps:

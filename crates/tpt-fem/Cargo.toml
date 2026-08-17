@@ -13,6 +13,8 @@ keywords = ["finite-element", "fem", "scientific-computing", "simulation", "hpc"
 categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
+thiserror = "1"
+toml = "0.8"
 tpt-fem-quadrature = { workspace = true, optional = true }
 tpt-fem-element = { workspace = true, optional = true }
 tpt-fem-mesh = { workspace = true, optional = true }

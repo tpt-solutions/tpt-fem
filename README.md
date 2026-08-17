@@ -74,6 +74,37 @@ See also:
 * [`crates/tpt-fem-thermal/tests/mms_convergence.rs`](crates/tpt-fem-thermal/tests/mms_convergence.rs) —
   Method-of-Manufactured-Solutions convergence (L2/H1 rates).
 
+## Getting started
+
+Every adoption path begins with a clone — crates.io / PyPI publishing are out of
+scope for this repository, so there is nothing to `cargo add`. From a checkout:
+
+```bash
+# 1. Clone the workspace.
+git clone https://github.com/tpt-solutions/tpt-fem.git
+cd tpt-fem
+
+# 2. Run the end-to-end Poisson example (uses only the umbrella prelude).
+cargo run -p tpt-fem --example thermal_solve
+```
+
+Expected output (values vary slightly with mesh count):
+
+```text
+Poisson solution on 864 tets: u in [0.000000, 0.013778]
+Wrote thermal_solve.vtk
+```
+
+Open `thermal_solve.vtk` in ParaView to inspect the temperature field. From
+here, explore the other examples under
+[`crates/tpt-fem/examples/`](crates/tpt-fem/examples) (frame elasticity, modal
+analysis, box mesh generation, Abaqus import), or drive a problem from a TOML
+config with the CLI:
+
+```bash
+cargo run -p tpt-fem-cli -- solve examples/poisson.toml
+```
+
 ## Command-line driver
 
 ```bash

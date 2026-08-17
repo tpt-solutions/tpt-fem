@@ -64,7 +64,7 @@ thermal_solve`).
 - `tpt-fem-quadrature` — Gauss quadrature rules.
 - `tpt-fem-element` — reference elements & shape functions.
 - `tpt-fem-mesh` — mesh model & Gmsh import.
-- `tpt-fem-sparse` — COO/CSR assembly & `faer` solve.
+- `tpt-fem-sparse` — COO/CSR assembly & in-house dense-LU solve (optional `russell` sparse-direct backend).
 - `tpt-fem-assembly` — assembly & boundary conditions.
 - `tpt-fem-thermal` — Poisson / heat conduction.
 - `tpt-fem-elasticity` — linear elasticity & beams.

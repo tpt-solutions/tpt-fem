@@ -33,6 +33,9 @@ constant = 1.0
 #   box_sel  = all nodes inside the axis-aligned box [min, max]
 #   region   = nodes tagged with Gmsh physical-group `region`
 #   boundary = all nodes on the mesh boundary (faces shared by ≤1 element)
+#   dofs     = (vector problems only) which displacement components to pin
+#              (0-based); omit to fix every component. Ignored for this scalar
+#              Poisson problem, which has one DOF per node.
 [[bc]]
 value = 0.0
 boundary = true
