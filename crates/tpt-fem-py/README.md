@@ -40,23 +40,55 @@ import tpt_fem as fem
 # Build a structured box mesh.
 mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [8, 8, 8])
 
-# Solve -∇·(k∇u) = 1 with a Python source callable.
-def source(x, y, z):
-    return 1.0
+# Dirichlet u = 0 on every boundary face, then solve -∇·(k∇u) = 1.
+poisson_bcs = [
+    (nid, 0.0)
+    for axis in range(3)
+    for coord in (0.0, 1.0)
+    for nid in mesh.nodes_on_plane(axis, coord, 1e-9)
+]
+u = fem.solve_poisson(mesh, 1.0, 2, 1.0, poisson_bcs)
 
-u = fem.solve_poisson(mesh, 1.0, 2, source, [])
-
-# Linear elasticity (3-D continuum): clamp one face, free elsewhere.
-bcs = [(nid, c, 0.0) for nid in mesh.nodes_on_plane(0, 0.0, 1e-9) for c in range(3)]
-u = fem.solve_elasticity(mesh, "3d", 200e9, 0.3, 2, bcs)
+# Linear elasticity (3-D continuum) on a slender clamped bar.
+bar = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 0.2, 0.2], [8, 2, 2])
+bcs = [(nid, c, 0.0) for nid in bar.nodes_on_plane(0, 0.0, 1e-9) for c in range(3)]
+u = fem.solve_elasticity(bar, "3d", 200e9, 0.3, 2, bcs)
 
 # Natural vibration: first 4 modes of the K φ = ω² M φ eigenproblem.
-modes = fem.solve_modal(mesh, "3d", 200e9, 0.3, 7800.0, 2, 4, bcs)
-for w2, shape in modes:
-    print("ω² =", w2)
+modes = fem.solve_modal(bar, "3d", 200e9, 0.3, 7800.0, 2, 4, bcs)
+for m in modes:
+    print("ω² =", m.omega2, "ω =", m.omega)
 
-# Export the solution to VTK.
-mesh.write_vtk("result.vtk", "u", u)
+# Export a solution to VTK.
+bar.write_vtk("result.vtk", "u", u.values)
+```
+
+## Visualization & Jupyter
+
+Each solver returns a Jupyter-friendly **result object** (not a bare `list`):
+`PoissonSolution`, `ElasticitySolution`, and `ModalSolution` (whose elements
+are `ModeShape` objects). They carry rich `__repr__` / `_repr_html_` display and
+two convenience accessors:
+
+* `to_numpy()` — returns an `np.ndarray` (`(n_nodes,)` for scalar Poisson,
+  `(n_nodes, dim)` for the vector fields). Requires `numpy`.
+* `to_pyvista()` — returns a `pyvista.UnstructuredGrid` with the field attached
+  as point data (`"u"` / `"disp"` / `"mode"`), so results go straight into
+  PyVista / ParaView / matplotlib without a manual VTK export round-trip.
+  Requires `pyvista` (and `numpy`).
+
+```python
+import numpy as np, pyvista as pv
+
+u = fem.solve_poisson(mesh, 1.0, 2, 1.0, poisson_bcs)
+field = u.to_numpy()          # np.ndarray, shape (n_nodes,)
+grid = u.to_pyvista()         # pyvista.UnstructuredGrid
+grid.plot(scalars="u")        # works in a Jupyter notebook
+
+modes = fem.solve_modal(bar, "3d", 200e9, 0.3, 7800.0, 2, 4, bcs)
+m0 = modes[0]                 # ModeShape (indexable / iterable)
+print(m0.omega, m0.omega2)    # natural frequency and its square
+m0.to_pyvista().plot(scalars="mode")
 ```
 
 ## API highlights
@@ -68,9 +100,9 @@ mesh.write_vtk("result.vtk", "u", u)
 | `Mesh.coords` | Node coordinate array. |
 | `Mesh.nodes_on_plane(...)` / `Mesh.nodes_in_box(...)` | Node selection helpers. |
 | `Mesh.write_vtk(path)` | Export to VTK. |
-| `solve_poisson(mesh, conductivity, quad_order, source, bcs)` | Solve Poisson with constant or callable source. |
-| `solve_elasticity(mesh, model, young, poisson, quad_order, bcs)` | Linear statics; `model` ∈ `bar`/`plane-stress`/`plane-strain`/`3d`. `bcs` are `(node, component, value)` tuples. |
-| `solve_modal(mesh, model, young, poisson, density, quad_order, num_modes, bcs)` | Natural-vibration eigenproblem; returns a list of `(ω², mode_shape)` pairs. |
+| `solve_poisson(...)` → `PoissonSolution` | Steady heat conduction; constant or callable source. `.values` is `(n_nodes,)`; `.to_numpy()` / `.to_pyvista()` for interop. |
+| `solve_elasticity(...)` → `ElasticitySolution` | Linear statics; `model` ∈ `bar`/`plane-stress`/`plane-strain`/`3d`. `.values` is `(n_nodes * dim,)`; `.to_numpy()` is `(n_nodes, dim)`. |
+| `solve_modal(...)` → `ModalSolution` | Natural-vibration eigenproblem; indexable / iterable over `ModeShape` objects (`.omega2`, `.omega`, `.to_numpy()`, `.to_pyvista()`). `.omega2s()` / `.frequencies()` list ω² / ω. |
 
 ## Position in the crate stack
 

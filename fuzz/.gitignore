@@ -1,0 +1,4 @@
+# Local build artifacts for the excluded cargo-fuzz crate.
+/target
+corpus
+artifacts

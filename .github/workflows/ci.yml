@@ -76,6 +76,27 @@ jobs:
       - name: wasm (soft-fail sparse)
         run: cargo build -p tpt-fem-sparse --target wasm32-unknown-unknown || true
 
+  # Track criterion benchmark output over time. The dense-LU (`tpt-fem-sparse`)
+  # and Delaunay/box-mesh (`tpt-fem-mesh-gen`) benches are run and their results
+  # uploaded as an artifact so regressions can be compared across runs (a
+  # github-action-benchmark-style PR dashboard is a future enhancement). Uses
+  # default features only — the optional `russell` sparse-direct backend needs
+  # the SuiteSparse/MUMPS toolchain and is not built here.
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run criterion benchmarks
+        run: |
+          cargo bench -p tpt-fem-sparse -p tpt-fem-mesh-gen
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-benchmarks
+          path: target/criterion
+
   fuzz-build:
     runs-on: ubuntu-latest
     steps:
@@ -85,7 +106,7 @@ jobs:
       - name: compile-only fuzz targets
         run: |
           cd fuzz
-          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip; do
+          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip vtk_import; do
             cargo +nightly build --bin $t
           done
 
@@ -114,7 +135,7 @@ jobs:
       - name: Run fuzz targets
         run: |
           cd fuzz
-          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip; do
+          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip vtk_import; do
             cargo +nightly fuzz run $t -- -max_total_time=120 -timeout=10
           done
 

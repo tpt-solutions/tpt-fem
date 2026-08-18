@@ -448,9 +448,9 @@ tracked for a future pass.*
 - [x] `tpt-fem-cli`: `load_mesh` now supports Abaqus `.inp` (via
       `read_inp`) and Exodus `.ex`/`.ex2`/`.e` (via `read_exodus`) in addition
       to `.msh`/`.vtk`, with a round-trip regression test.
-- [ ] `tpt-fem-io-vtk`: add a real VTK reader to the crate itself (currently
-      only an ad-hoc reader lives inside the CLI). **Deferred** — low priority;
-      the CLI's reader already covers the `.msh`→`.vtk` round-trip need.
+- [x] `tpt-fem-io-vtk`: add a real VTK reader to the crate itself (currently
+      only an ad-hoc reader lives inside the CLI). **Superseded** by Phase 10c
+      (`read_vtk`/`mesh_from_vtk`), which delivered exactly this.
 - [ ] Consider additional export formats: CSV, Gmsh writer (currently
       import-only), STL, XDMF/HDF5 — lowest priority, evaluate demand first.
 - [x] `tpt-fem-thermal`: `mms_3d_converges` is `#[ignore]`d but now runs on the
@@ -561,28 +561,63 @@ tracked for a future pass.*
        uses the crate-level reader; `vtkio` was dropped from the CLI deps. A
        round-trip test (`read_vtk_round_trips_mesh`) and the existing
        `mesh_convert` test exercise it.
-- [ ] `tpt-fem-py`: Jupyter-friendly result objects (`__repr__`/
-      `_repr_html_`, `to_pyvista()`/`to_numpy()` helpers) once elasticity/modal
-      bindings land, so results plug into PyVista/matplotlib without manual
-      VTK export/reimport round-trips.
-- [ ] `tpt-fem-cli`: `tpt-fem init` scaffolding subcommand that generates a
-      starter `problem.toml` + minimal mesh for a chosen problem type
-      (poisson/elasticity/modal).
-- [ ] CI: track `criterion` bench output over time (e.g.
-      `github-action-benchmark`-style regression tracking) instead of local/
-      ad hoc results only.
+- [x] `tpt-fem-py`: Jupyter-friendly result objects. `solve_poisson` now
+       returns `PoissonSolution`, `solve_elasticity` returns
+       `ElasticitySolution`, and `solve_modal` returns `ModalSolution` (indexable
+       / iterable over `ModeShape` objects) — instead of bare lists. Each carries
+       rich `__repr__`/`_repr_html_` display, `to_numpy()` (returns an `np.ndarray`;
+       shape `(n,)` for scalar Poisson, `(n, dim)` for vector fields), and
+       `to_pyvista()` (returns a `pyvista.UnstructuredGrid` with the field attached
+       as point data `"u"`/`"disp"`/`"mode"`), so results plug into
+       PyVista/matplotlib/Jupyter without a manual VTK export round-trip.
+       `numpy` is required for `to_numpy`; `pyvista` for `to_pyvista` (both declared
+       as the `viz` optional extra in `pyproject.toml`). The crate README got a
+       "Visualization & Jupyter" section + updated API table, `walkthrough.py` and
+       the pytest suite were updated to the new objects, and two new drift-guard
+       tests (`test_to_numpy_shapes`, `test_to_pyvista_round_trips`, the latter
+       `importorskip`-gated on `pyvista`) were added. `cargo check` + `cargo clippy
+       --all-targets -D warnings` pass on the crate (maturin/pytest can't run here
+       since `maturin`/`pyvista` aren't installed on this dev box — the Python
+       tests must be re-run via `maturin develop` + `pytest` to fully validate the
+       `to_pyvista` path).
+- [x] `tpt-fem-cli`: `tpt-fem init` scaffolding subcommand that generates a
+       starter `problem.toml` + minimal mesh for a chosen problem type
+       (poisson/elasticity/modal). `Init { problem, output }` writes a
+       type-specific starter config (Poisson/elasticity/modal templates) to the
+       given path; documented in the root README and guarded by
+       `init_writes_starter_config` (rejects unknown problem types).
+- [x] CI: track `criterion` bench output over time (e.g.
+       `github-action-benchmark`-style regression tracking) instead of local/
+       ad hoc results only. Added a `bench` CI job (default features; the
+       `russell` backend is excluded since it needs the SuiteSparse/MUMPS
+       toolchain) that runs the `tpt-fem-sparse` and `tpt-fem-mesh-gen`
+       criterion benches and uploads `target/criterion` as a workflow artifact
+       for cross-run comparison. (A PR-dashboard `github-action-benchmark`
+       wiring is a future enhancement.)
 
 ### 10d — Usability / automation
 
 - [x] Add a root `CONTRIBUTING.md` documenting the `Justfile` commands,
        crate-DAG conventions, and the `todo.md`/Phase workflow.
-- [ ] Extend the `cli_usage_matches_readme` drift-guard pattern to the
-      Python README's usage snippet (nothing currently enforces it still
-      compiles/runs against the bound API).
-- [ ] Add a `vtk_import` fuzz target once a real VTK reader lands per 10c.
-- [ ] Add a gated (manual/`workflow_dispatch`, not auto-run) `maturin
-      publish` GitHub Action for `tpt-fem-py` — `pyproject.toml` is already
-      PyPI-shaped but nothing publishes it.
+- [x] Extend the `cli_usage_matches_readme` drift-guard pattern to the
+       Python README's usage snippet (nothing currently enforces it still
+       compiles/runs against the bound API). `crates/tpt-fem-py/tests/
+       test_tpt_fem.py::test_readme_snippet` now runs the exact API shown in
+       the crate README (Poisson + elasticity + modal) and fails if the bound
+       surface changes; the README usage was also corrected (it previously used
+       an empty BC list, which makes the Poisson system singular).
+- [x] Add a `vtk_import` fuzz target once a real VTK reader lands per 10c.
+       Added `fuzz/fuzz_targets/vtk_import.rs` (and registered it in
+       `fuzz/Cargo.toml` with a `tpt-fem-io-vtk` dependency). It feeds
+       arbitrary bytes to the promoted `tpt_fem_io_vtk::read_vtk` reader via a
+       temp file, asserting the reader returns `Err` rather than panicking on
+       malformed input. Wired into the CI `fuzz-build`/`fuzz-run` loops.
+- [x] Add a gated (manual/`workflow_dispatch`, not auto-run) `maturin
+       publish` GitHub Action for `tpt-fem-py` — `pyproject.toml` is already
+       PyPI-shaped but nothing publishes it. Added a `publish` job to
+       `.github/workflows/python.yml` gated on `workflow_dispatch` that runs
+       `maturin publish --non-interactive` with a `PYPI_TOKEN` repo secret
+       (`environment: pypi`); it does not run on push/PR.
 
 ### 10e — Adoption: examples, templates, onboarding
 
@@ -592,12 +627,114 @@ tracked for a future pass.*
        `thermal_solve.rs`. All four build and run; `elasticity_frame` matches
        the analytical tip deflection and `modal_analysis` yields positive,
        increasing natural frequencies.
-- [ ] Add a `crates/tpt-fem-py/examples/` directory (or notebook) walking
-      through mesh load → solve → VTK export → visualize.
-- [ ] Stand up a minimal docs site (e.g. `mdbook`) or a linked root `docs/`
-      folder consolidating the 15 per-crate READMEs into one browsable
-      narrative — currently no single entry point exists.
+- [x] Add a `crates/tpt-fem-py/examples/` directory (or notebook) walking
+       through mesh load → solve → VTK export → visualize. Added
+       `crates/tpt-fem-py/examples/walkthrough.py`, a runnable end-to-end
+       example (Poisson + 3-D elasticity + modal analysis on a clamped bar,
+       exporting VTK) validated via `maturin develop`.
+- [x] Stand up a minimal docs site (e.g. `mdbook`) or a linked root `docs/`
+       folder consolidating the 15 per-crate READMEs into one browsable
+       narrative — currently no single entry point exists. Added
+       `docs/README.md`: a capability map, a per-crate README index, the
+       end-to-end Rust/Python examples, and developer-doc pointers. (A full
+       `mdbook` render is a future enhancement; this provides the single
+       browsable entry point.)
 - [x] Add a "Getting Started" section to the root README showing
        `git clone` → `cargo run --example thermal_solve` → expected output,
        since crates.io/PyPI publishing remain out of scope and every
        adoption path starts with a clone today.
+
+---
+
+## Phase 11 — Platform Review Follow-ups (2026-08-18b)
+
+*A third platform review (bugs/TODOs/missing features) on 2026-08-18,
+covering the repo as Phase 10's changes stand uncommitted. Nothing here has
+been implemented yet — tracked for a future pass.*
+
+### 11a — Bugs
+
+- [ ] `fuzz/Cargo.toml`: the `[dependencies.tpt-fem-io-abaqus]` block was
+      dropped (apparently while wiring up the new `vtk_import` `[[bin]]`),
+      but the pre-existing `abaqus_inp` `[[bin]]` target and its source
+      (`fuzz/fuzz_targets/abaqus_inp.rs:5`, `tpt_fem_io_abaqus::read_inp`)
+      still need it — `cargo +nightly build --bin abaqus_inp` will fail to
+      compile as committed, breaking both the `fuzz-build`
+      (`.github/workflows/ci.yml:106,109`) and `fuzz-run`
+      (`.github/workflows/ci.yml:135,138`) CI jobs, which still loop over
+      `abaqus_inp`. Fix: restore the `tpt-fem-io-abaqus` path dependency.
+- [ ] `todo.md:451-453` (Phase 9c) still records "`tpt-fem-io-vtk`: add a
+      real VTK reader" as unchecked/`**Deferred**`, but Phase 10c
+      (`todo.md:555-563`) already implemented and checked off exactly that
+      (`read_vtk`/`mesh_from_vtk`). The two entries now contradict each
+      other; mark 9c's line as superseded by 10c.
+- [ ] `deny.toml:7-9,20`: the `RUSTSEC-2024-0436` (`paste`, unmaintained)
+      suppression is justified in-comment as "pulled in transitively by
+      `faer`'s BLAS kernels" — but `faer` is no longer a dependency anywhere
+      in the workspace (no `faer` reference in any `Cargo.toml`) and `paste`
+      does not appear in `Cargo.lock` at all (`grep -c paste Cargo.lock` →
+      0). The suppression looks stale/dead — either the advisory no longer
+      applies and the `ignore` entry + comment can be dropped, or the
+      comment is wrong about why it's still needed and should be corrected.
+      Re-run `cargo deny check` after removing it to confirm.
+
+### 11b — Panic-risk hardening (library-facing, not test code)
+
+- [x] `tpt-fem-py/src/lib.rs:146,151,165`: `solve_poisson`'s callback-error
+      cell (`Arc<Mutex<Option<PyErr>>>`) is read/written via bare
+      `.lock().unwrap()` three times. If the guarded closure ever panics
+      while holding the lock, the mutex poisons and the read-back at line
+      165 panics instead of surfacing a `PyErr` — low likelihood today
+      (nothing between `.lock()` and the assignment can panic currently) but
+      worth `unwrap_or_else(PoisonError::into_inner)` for defense-in-depth
+      since it's the newest file in the workspace to still panic on purpose.
+- [x] The following production `.unwrap()`/`.expect()` sites (all outside
+      `#[cfg(test)]`) don't yet have the "documented as deliberately
+      deferred" treatment `tpt-fem-element`'s `mat_det`/`mat_inv` got in
+      Phase 9b/10a — either give them the same debug_assert!+doc-note
+      treatment or convert to `Result`:
+      - `tpt-fem-assembly/src/lib.rs:519` — `bcs.iter().find(...).unwrap().1`
+      - `tpt-fem-element/src/lib.rs:559,584` —
+        `.position(|v| *v == 0.0).unwrap()` (exact float-equality search on
+        reference-node coordinates)
+      - `tpt-fem-io-abaqus/src/lib.rs:218` — `element_type.unwrap()`
+      - `tpt-fem-mesh/src/lib.rs:698` — `.expect("P2 reference coordinate
+        must appear in the Gmsh ordering")`
+      - `tpt-fem-mesh-gen/src/lib.rs:580-581` — two `.find(...).unwrap()`
+        locating the remaining tet faces during Delaunay flips
+
+### 11c — Missing / incomplete features
+
+- [ ] `tpt-fem-cli`: the `solve`/`elasticity`/`modal` subcommands
+      (`crates/tpt-fem-cli/src/main.rs:38-51`) all dispatch to the same
+      `solve_config` (`main.rs:510`), which reads the actual problem kind
+      from `cfg.problem.r#type` in the TOML — the subcommand name is
+      cosmetic and never validated against the config's declared type. E.g.
+      `tpt-fem elasticity poisson.toml` silently solves Poisson instead of
+      erroring "expected an elasticity config". Consider a check that
+      `cfg.problem.r#type` matches the invoked subcommand and errors
+      otherwise.
+- [ ] `tpt-fem-py`: no `.pyi` type-stub file ships with the crate (checked
+      `crates/tpt-fem-py/` — only `src`/`tests`/`examples`/README/
+      pyproject.toml, no stub). IDE autocomplete/type-checking (mypy/
+      pyright) against the bound classes (`Mesh`, `PoissonSolution`,
+      `ElasticitySolution`, `ModalSolution`, `ModeShape`) gets no static
+      typing today. Worth a `.pyi` alongside the module once the bound API
+      stabilizes.
+- [ ] `tpt-fem-solve`/`tpt-fem-eigen`: per `todo.md:303-310`/`:298-302`, the
+      arc-length continuation and generalized Lanczos eigensolver are only
+      verified against textbook/algebraic cases (an algebraic fold, a 2-bar
+      snap-through truss, and standard modal problems) — no test coverage of
+      near-singular/ill-conditioned inputs (e.g. a Jacobian close to
+      singular away from the tracked fold, or closely-clustered eigenvalues
+      stressing the shift-invert Lanczos restart). Low priority unless a
+      user hits a real convergence failure, but worth flagging since these
+      are the two most numerically delicate solvers in the workspace.
+
+### 11d — Revisit periodically
+
+- [ ] `todo.md`'s Phase 9f note ("`deny.toml` suppresses three RUSTSEC
+      advisories") is now inaccurate — `deny.toml` currently suppresses
+      *four* (`RUSTSEC-2024-0436` plus the three vtkio-transitive ones);
+      update the count once 11a's `paste`/`faer` staleness is resolved one
+      way or the other.

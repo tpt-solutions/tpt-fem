@@ -30,3 +30,27 @@ jobs:
       - name: Run the pytest suite
         working-directory: crates/tpt-fem-py
         run: python -m pytest -q
+
+  # Gated publish job. NOT run on push/PR — only via manual `workflow_dispatch`,
+  # and only if a `PYPI_TOKEN` repository secret is configured. `pyproject.toml`
+  # is already PyPI-shaped, so this builds and uploads the wheel when invoked.
+  publish:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin
+      - name: Build and publish the wheel
+        working-directory: crates/tpt-fem-py
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: maturin publish --non-interactive

@@ -692,6 +692,12 @@ fn reorder_p2(cell: CellType, gmsh_nodes: &[NodeId]) -> Vec<NodeId> {
     let gmsh_ref = p2_gmsh_reference(cell);
     let mut out = vec![0usize; our_ref.len()];
     for (oi, rc) in our_ref.iter().enumerate() {
+        // `our_ref` and `gmsh_ref` describe the same P2 reference element, so
+        // every coordinate in `our_ref` occurs in `gmsh_ref`. Contracted
+        // precondition (mirrors the `mat_det`/`mat_inv` treatment, Phase 9b/10a;
+        // see `todo.md` 11b): conversion to `Result` was deferred as the
+        // invariant is provable for all P2 cell types.
+        debug_assert!(gmsh_ref.iter().any(|g| coord_eq(g, rc)));
         let gi = gmsh_ref
             .iter()
             .position(|g| coord_eq(g, rc))

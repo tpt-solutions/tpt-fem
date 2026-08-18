@@ -18,8 +18,8 @@ def main():
         for nid in mesh.nodes_on_plane(axis, coord, 1e-9)
     ]
     u = fem.solve_poisson(mesh, 1.0, 2, 1.0, poisson_bcs)
-    print(f"Poisson: {len(u)} DOFs, u in [{min(u):.4f}, {max(u):.4f}]")
-    mesh.write_vtk("walkthrough_poisson.vtk", "u", u)
+    print(f"Poisson: {len(u)} DOFs, u in [{min(u.values):.4f}, {max(u.values):.4f}]")
+    mesh.write_vtk("walkthrough_poisson.vtk", "u", u.values)
 
     # 2. Linear elasticity (3-D continuum) on a slender clamped bar.
     bar = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 0.2, 0.2], [8, 2, 2])
@@ -33,9 +33,9 @@ def main():
 
     # 3. Natural-vibration modes of the same bar.
     modes = fem.solve_modal(bar, "3d", 200e9, 0.3, 7800.0, 2, 4, elas_bcs)
-    for i, (w2, shape) in enumerate(modes, 1):
-        print(f"  mode {i}: omega^2 = {w2:.4e}")
-    bar.write_vtk("walkthrough_modal.vtk", "mode1", modes[0][1])
+    for i, m in enumerate(modes, 1):
+        print(f"  mode {i}: omega^2 = {m.omega2:.4e}")
+    bar.write_vtk("walkthrough_modal.vtk", "mode1", modes[0].shape)
 
 
 if __name__ == "__main__":

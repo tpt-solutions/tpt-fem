@@ -108,10 +108,13 @@ cargo run -p tpt-fem-cli -- solve examples/poisson.toml
 ## Command-line driver
 
 ```bash
+# Scaffold a starter problem config for the chosen problem type.
+cargo run -p tpt-fem-cli -- init poisson problem.toml
+
 # Solve a Poisson problem from a TOML config (see crates/tpt-fem-cli for schema).
 cargo run -p tpt-fem-cli -- solve problem.toml
 
-# Inspect a mesh (.msh or .vtk).
+# Inspect a mesh (.msh / .vtk / .inp / .ex).
 cargo run -p tpt-fem-cli -- mesh info mesh.msh
 
 # Convert a Gmsh .msh mesh to a ParaView .vtk file.
@@ -122,7 +125,7 @@ A `problem.toml` looks like:
 
 ```toml
 [problem]
-type = "poisson"            # only "poisson" supported this pass
+type = "poisson"            # or "elasticity" / "modal" (see crates/tpt-fem-cli/examples)
 
 [mesh]
 dim = 2                    # 2 or 3; or set `file = "mesh.msh"` to import

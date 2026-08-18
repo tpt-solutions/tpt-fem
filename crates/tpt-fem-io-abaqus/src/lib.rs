@@ -215,6 +215,11 @@ pub fn read_inp_deck(text: &str) -> Result<InpDeck, InpError> {
                 if parts.len() < 2 {
                     return Err(InpError::Parse(format!("element record: {line}")));
                 }
+                // Entering `Section::Element` always sets `element_type` (and
+                // returns `UnknownElementType` if parsing fails), so it is `Some`
+                // here. Contracted precondition (mirrors the `mat_det`/`mat_inv`
+                // treatment, Phase 9b/10a; see `todo.md` 11b).
+                debug_assert!(element_type.is_some());
                 let cell = element_type.unwrap();
                 let nodes: Vec<usize> = parts
                     .iter()

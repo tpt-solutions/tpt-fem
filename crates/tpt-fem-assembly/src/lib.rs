@@ -516,6 +516,12 @@ pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSys
             let col = csr.col_ind[c];
             let v = csr.values[c];
             if fixed.contains(&col) {
+                // `col` was collected directly from `bcs` into `fixed`, so this
+                // DOF is guaranteed to appear in `bcs`. Contracted precondition
+                // (mirrors the `mat_det`/`mat_inv` treatment from Phase 9b/10a):
+                // converting the lookup to a `Result` was deferred because the
+                // invariant is local and provably true. See `todo.md` (11b).
+                debug_assert!(bcs.iter().any(|(i, _)| *i == col));
                 let val = bcs.iter().find(|(i, _)| *i == col).unwrap().1;
                 r -= v * val;
             } else {

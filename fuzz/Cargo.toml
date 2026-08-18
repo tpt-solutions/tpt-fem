@@ -16,6 +16,9 @@ path = "../crates/tpt-fem-mesh"
 [dependencies.tpt-fem-io-exodus]
 path = "../crates/tpt-fem-io-exodus"
 
+[dependencies.tpt-fem-io-vtk]
+path = "../crates/tpt-fem-io-vtk"
+
 [dependencies.tpt-fem-io-abaqus]
 path = "../crates/tpt-fem-io-abaqus"
 
@@ -43,6 +46,13 @@ bench = false
 [[bin]]
 name = "exodus_roundtrip"
 path = "fuzz_targets/exodus_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vtk_import"
+path = "fuzz_targets/vtk_import.rs"
 test = false
 doc = false
 bench = false

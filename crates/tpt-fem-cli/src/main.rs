@@ -256,9 +256,9 @@ fn main() {
 fn run() -> Result<(), Err> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Solve { config } => solve_config(&config),
-        Command::Elasticity { config } => solve_config(&config),
-        Command::Modal { config } => solve_config(&config),
+        Command::Solve { config } => solve_config(&config, None),
+        Command::Elasticity { config } => solve_config(&config, Some("elasticity")),
+        Command::Modal { config } => solve_config(&config, Some("modal")),
         Command::Init { problem, output } => init_config(&problem, &output),
         Command::Mesh { action } => match action {
             MeshAction::Info { file } => mesh_info(&file),
@@ -507,9 +507,18 @@ fn init_config(problem: &str, output: &PathBuf) -> Result<(), Err> {
     Ok(())
 }
 
-fn solve_config(path: &PathBuf) -> Result<(), Err> {
+fn solve_config(path: &PathBuf, expected: Option<&str>) -> Result<(), Err> {
     let text = std::fs::read_to_string(path)?;
     let cfg: Config = toml::from_str(&text)?;
+
+    if let Some(expected) = expected {
+        if cfg.problem.r#type != expected {
+            return Err(Error::Msg(format!(
+                "subcommand '{}' requires problem.type = \"{}\", but config declares \"{}\"",
+                expected, expected, cfg.problem.r#type
+            )));
+        }
+    }
 
     let mesh = build_mesh(&cfg.mesh)?;
     println!(
@@ -789,7 +798,7 @@ $EndElements
             out_toml
         );
         let cfg_path = write_temp("tpt_fem_cli_solve_test.toml", &cfg);
-        solve_config(&cfg_path).expect("solve_config");
+        solve_config(&cfg_path, None).expect("solve_config");
         let meta = std::fs::metadata(&out).expect("output written");
         assert!(meta.len() > 0, "VTK output should be non-empty");
         let _ = std::fs::remove_file(&out);
@@ -840,6 +849,27 @@ $EndElements
         let _ = std::fs::remove_file(&msh);
         let _ = std::fs::remove_file(&inp_path);
         let _ = std::fs::remove_file(&ex_path);
+    }
+
+    #[test]
+    fn init_writes_starter_config() {
+        // `init` must produce a parseable starter config for each problem
+        // type; the generated Poisson config then drives a full solve.
+        for ptype in ["poisson", "elasticity", "modal"] {
+            let cfg_path = std::env::temp_dir().join(format!("tpt_fem_cli_init_{ptype}.toml"));
+            init_config(ptype, &cfg_path).unwrap_or_else(|e| panic!("{ptype}: {e}"));
+            let text = std::fs::read_to_string(&cfg_path).expect("read generated config");
+            assert!(
+                text.contains("[problem]"),
+                "{ptype} config missing [problem]"
+            );
+            assert!(text.contains("type = "), "{ptype} config missing type");
+            let _ = std::fs::remove_file(&cfg_path);
+        }
+        // And an unknown problem type is rejected, not silently written.
+        let bad = std::env::temp_dir().join("tpt_fem_cli_init_bad.toml");
+        assert!(init_config("nope", &bad).is_err());
+        let _ = std::fs::remove_file(&bad);
     }
 
     #[test]
@@ -911,7 +941,7 @@ $EndElements
             out_toml
         );
         let cfg_path = write_temp("tpt_fem_cli_elasticity_test.toml", &cfg);
-        solve_config(&cfg_path).expect("elasticity solve_config");
+        solve_config(&cfg_path, Some("elasticity")).expect("elasticity solve_config");
         let meta = std::fs::metadata(&out).expect("output written");
         assert!(meta.len() > 0, "VTK output should be non-empty");
         let _ = std::fs::remove_file(&out);
@@ -933,10 +963,33 @@ $EndElements
             out_toml
         );
         let cfg_path = write_temp("tpt_fem_cli_modal_test.toml", &cfg);
-        solve_config(&cfg_path).expect("modal solve_config");
+        solve_config(&cfg_path, Some("modal")).expect("modal solve_config");
         let meta = std::fs::metadata(&out).expect("output written");
         assert!(meta.len() > 0, "VTK output should be non-empty");
         let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&cfg_path);
+    }
+
+    #[test]
+    fn elasticity_subcommand_rejects_non_elastic_config() {
+        // Regression for the cosmetic-subcommand bug: invoking `elasticity`
+        // on a Poisson config must error rather than silently solving it.
+        let out = std::env::temp_dir().join("tpt_fem_cli_typecheck_test.vtk");
+        let out_toml = out.to_string_lossy().replace('\\', "/");
+        let cfg = format!(
+            "[problem]\ntype = \"poisson\"\n\
+             [mesh]\ndim = 2\nmin = [0.0, 0.0]\nmax = [1.0, 1.0]\nn = [4, 4]\n\
+             [material]\nconductivity = 1.0\n[source]\nconstant = 0.0\n\
+             [[bc]]\nvalue = 0.0\nboundary = true\n\
+             [output]\nvtk = \"{}\"\n",
+            out_toml
+        );
+        let cfg_path = write_temp("tpt_fem_cli_typecheck_test.toml", &cfg);
+        let result = solve_config(&cfg_path, Some("elasticity"));
+        assert!(
+            result.is_err(),
+            "elasticity subcommand must reject poisson config"
+        );
         let _ = std::fs::remove_file(&cfg_path);
     }
 }

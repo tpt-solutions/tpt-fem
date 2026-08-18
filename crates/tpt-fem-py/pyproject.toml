@@ -8,3 +8,12 @@ version = "0.1.0"
 requires-python = ">=3.8"
 description = "Python bindings for the tpt-fem finite-element core."
 license = { text = "MIT OR Apache-2.0" }
+
+[project.optional-dependencies]
+# Required only for the Jupyter-friendly result-object accessors:
+viz = ["numpy", "pyvista"]
+
+[tool.maturin]
+# Ship the type stub alongside the compiled extension so IDEs / mypy / pyright
+# get static typing for the bound classes and solver functions.
+include = ["tpt_fem.pyi"]
