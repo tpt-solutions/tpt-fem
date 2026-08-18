@@ -1,0 +1,63 @@
+# tpt-fem Specification
+
+## 1. Purpose
+A modular finite-element method (FEM) workspace for Rust. Provides a from-the-ground-up FEM core — reference elements, quadrature, mesh I/O, sparse assembly, linear/nonlinear physics, advanced material models, contact mechanics, and multiphysics coupling.
+
+## 2. Scope & Boundaries
+- IN SCOPE: FEM discretization, element formulation, sparse assembly, structural/thermal/material nonlinearities, contact, and multiphysics interfaces.
+- OUT OF SCOPE: Meshless methods (SPH/DEM - see `tpt-physics`), system-level optimization.
+- DEPENDS ON: `tpt-math` (linalg, linalg-complex, optimize, numeric).
+
+## 3. Crate Inventory
+
+### Core FEM
+| Crate | Domain | no_std | Description |
+|---|---|---|---|
+| `tpt-fem-quadrature` | core | yes | Fixed-order Gauss quadrature. |
+| `tpt-fem-element` | core | yes | Reference elements, Lagrange P1, isoparametric Jacobian. |
+| `tpt-fem-mesh` | core | no | Mesh data model, DOF numbering, Gmsh import. |
+| `tpt-fem-sparse` | core | no | COO/CSR assembly adapter, sparse LU solve. |
+| `tpt-fem-assembly` | core | no | Element-to-global scatter, BCs, reduced-system extraction. |
+
+### Physics & Solvers
+| Crate | Domain | no_std | Description |
+|---|---|---|---|
+| `tpt-fem-thermal` | physics | no | Heat-conduction / Poisson elements. |
+| `tpt-fem-elasticity` | physics | no | 2-D frames, 2-D/3-D continuum linear elasticity. |
+| `tpt-fem-solve` | solver | no | Newton–Raphson and real arc-length continuation. |
+| `tpt-fem-eigen` | solver | no | Sparse shift-invert Lanczos/Arnoldi eigensolver. |
+| `tpt-fem-fluid` | physics | no | Stokes flow, low-Re Navier-Stokes elements (for FSI). |
+
+### Advanced Materials & Contact (New)
+| Crate | Domain | no_std | Description |
+|---|---|---|---|
+| `tpt-fem-plasticity` | material | no | J2 (von Mises) plasticity, kinematic/isotropic hardening, return mapping. |
+| `tpt-fem-damage` | material | no | Continuum damage mechanics, ductile/brittle failure, element deletion. |
+| `tpt-fem-hyperelastic` | material | no | Neo-Hookean, Mooney-Rivlin, Ogden models for soft tissue. |
+| `tpt-fem-composite` | material | no | Classical lamination theory, cohesive zone models, delamination. |
+| `tpt-fem-porous` | material | no | Biot's consolidation, Darcy flow, permeability tensors. |
+| `tpt-fem-contact` | interaction | no | Surface-to-surface contact, penalty/augmented Lagrangian, wear. |
+
+### Multiphysics & I/O
+| Crate | Domain | no_std | Description |
+|---|---|---|---|
+| `tpt-fem-coupling` | multiphysics | no | Thermal-structural, electro-thermal, fluid-structure interface operators. |
+| `tpt-fem-io-vtk` | io | no | ParaView `.vtk` / `.vtu` export. |
+| `tpt-fem-io-abaqus` | io | no | Abaqus `.inp` reader/writer. |
+| `tpt-fem-io-exodus` | io | no | Exodus II reader/writer. |
+| `tpt-fem-mesh-gen` | mesh | no | Native 3-D tetrahedral mesh generation. |
+| `tpt-fem` | umbrella | no | Feature-gated re-exports. |
+| `tpt-fem-cli` | cli | no | Command-line driver. |
+
+## 4. Build Order
+1. Core FEM (quadrature, element, mesh, sparse, assembly).
+2. Basic Physics & Solvers (thermal, elasticity, solve, eigen).
+3. Advanced Materials & Contact (plasticity, damage, hyperelastic, composite, porous, contact).
+4. Fluid & Multiphysics (fluid, coupling).
+5. I/O, Mesh Gen, Umbrella, CLI.
+
+## 5. Downstream Consumption
+- `tpt-transportation` uses `plasticity`, `damage`, `composite`, `contact`.
+- `tpt-medical` uses `hyperelastic`, `contact`, `fluid`.
+- `tpt-earth` uses `porous`, `plasticity`.
+- `tpt-physics` uses `coupling` for FSI and thermal-structural orchestration.

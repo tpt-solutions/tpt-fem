@@ -28,10 +28,26 @@ Mark each line `[x]` as you publish it.
 - [ ] tpt-fem            — umbrella crate; depends on: all of the above
 - [ ] tpt-fem-cli        — depends on: tpt-fem
 
+## Batch 4 (spec2 expansion — advanced materials, part 1)
+
+- [ ] tpt-fem-dofmap    — depends on: mesh
+- [ ] tpt-fem-dynamic   — depends on: sparse, assembly
+- [ ] tpt-fem-plasticity — depends on: assembly, solve
+- [ ] tpt-fem-hyperelastic — depends on: assembly, solve
+- [ ] tpt-fem-composite — depends on: elasticity
+
+## Batch 5 (spec2 expansion — advanced materials, part 2 + multiphysics)
+
+- [ ] tpt-fem-porous    — depends on: assembly, dynamic
+- [ ] tpt-fem-damage    — depends on: plasticity, dynamic
+- [ ] tpt-fem-contact   — depends on: assembly, dofmap, tpt-math-optimize-convex
+- [ ] tpt-fem-fluid     — depends on: dofmap, dynamic, assembly, solve
+- [ ] tpt-fem-coupling  — depends on: thermal, elasticity, fluid, dofmap, dynamic
+
 ## Summary
 
-Total crates: 15
-Batches: 3 (5 + 5 + 5)
+Total crates: 25
+Batches: 5 (5 + 5 + 5 + 5 + 5)
 
 Dependency notes:
 - `tpt-fem-sparse` has NO internal deps (it only depends on external crates), so it
