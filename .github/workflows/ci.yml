@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
   # Nightly run so the heavy `#[ignore]`d 3-D MMS convergence test
   # (`mms_3d_converges`) actually executes instead of never running in CI.
   schedule:
