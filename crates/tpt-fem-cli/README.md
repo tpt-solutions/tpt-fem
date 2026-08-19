@@ -60,6 +60,12 @@ tpt-fem mesh convert mesh.msh mesh.vtk
 tpt-fem (umbrella) ──► tpt-fem-cli
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `about` | `cargo run -p tpt-fem-cli --example about` | Prints the CLI's name, version, and subcommand summary (the solver logic lives in `main.rs`, not a public library API). |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

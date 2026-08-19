@@ -39,15 +39,14 @@ Mark each line `[x]` as you publish it.
 ## Batch 5 (spec2 expansion — advanced materials, part 2 + multiphysics)
 
 - [ ] tpt-fem-porous    — depends on: assembly, dynamic
-- [ ] tpt-fem-damage    — depends on: plasticity, dynamic
-- [ ] tpt-fem-contact   — depends on: assembly, dofmap, tpt-math-optimize-convex
+- [ ] tpt-fem-contact   — depends on: assembly, dofmap
 - [ ] tpt-fem-fluid     — depends on: dofmap, dynamic, assembly, solve
 - [ ] tpt-fem-coupling  — depends on: thermal, elasticity, fluid, dofmap, dynamic
 
 ## Summary
 
-Total crates: 25
-Batches: 5 (5 + 5 + 5 + 5 + 5)
+Total crates: 24 (the Python binding `tpt-fem-py` is unpublished and excluded).
+Batches: 5 (5 + 5 + 5 + 5 + 4)
 
 Dependency notes:
 - `tpt-fem-sparse` has NO internal deps (it only depends on external crates), so it

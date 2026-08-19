@@ -63,6 +63,14 @@ let x = tpt_fem_sparse::solve(&c, &[3.0, 5.0]).unwrap();
 tpt-fem-sparse ◄── tpt-fem-assembly ◄── tpt-fem-thermal / tpt-fem-elasticity
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `coo_to_csr` | `cargo run -p tpt-fem-sparse --example coo_to_csr` | Builds a `Coo` with duplicate entries and checks the summed `Csr` layout. |
+| `solve_linear` | `cargo run -p tpt-fem-sparse --example solve_linear` | Solves `[[2,1],[1,3]] x = [3,5]` and checks `x = [0.8, 1.4]`. |
+| `solve_multi` | `cargo run -p tpt-fem-sparse --example solve_multi` | Solves two right-hand sides against the same matrix and checks both solutions. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

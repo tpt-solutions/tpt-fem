@@ -1,0 +1,24 @@
+[package]
+name = "tpt-fem-plasticity"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "J2 (von Mises) plasticity with isotropic/kinematic hardening for tpt-fem, wired into the Newton loop."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "plasticity", "j2", "von-mises"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-solve = { workspace = true }
+tpt-fem-sparse = { workspace = true }
+tpt-fem-mesh = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

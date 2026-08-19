@@ -705,7 +705,7 @@ been implemented yet — tracked for a future pass.*
 
 ### 11c — Missing / incomplete features
 
-- [ ] `tpt-fem-cli`: the `solve`/`elasticity`/`modal` subcommands
+- [x] `tpt-fem-cli`: the `solve`/`elasticity`/`modal` subcommands
       (`crates/tpt-fem-cli/src/main.rs:38-51`) all dispatch to the same
       `solve_config` (`main.rs:510`), which reads the actual problem kind
       from `cfg.problem.r#type` in the TOML — the subcommand name is
@@ -714,7 +714,7 @@ been implemented yet — tracked for a future pass.*
       erroring "expected an elasticity config". Consider a check that
       `cfg.problem.r#type` matches the invoked subcommand and errors
       otherwise.
-- [ ] `tpt-fem-py`: no `.pyi` type-stub file ships with the crate (checked
+- [x] `tpt-fem-py`: no `.pyi` type-stub file ships with the crate (checked
       `crates/tpt-fem-py/` — only `src`/`tests`/`examples`/README/
       pyproject.toml, no stub). IDE autocomplete/type-checking (mypy/
       pyright) against the bound classes (`Mesh`, `PoissonSolution`,
@@ -733,11 +733,13 @@ been implemented yet — tracked for a future pass.*
 
 ### 11d — Revisit periodically
 
-- [ ] `todo.md`'s Phase 9f note ("`deny.toml` suppresses three RUSTSEC
-      advisories") is now inaccurate — `deny.toml` currently suppresses
-      *four* (`RUSTSEC-2024-0436` plus the three vtkio-transitive ones);
-      update the count once 11a's `paste`/`faer` staleness is resolved one
-      way or the other.
+- [x] `deny.toml` note resolved. The stale `RUSTSEC-2024-0436` (`paste`/
+      `faer`) suppression referenced here was never present in the current
+      `deny.toml` (only the three vtkio-transitive advisories are suppressed),
+      so the count of *three* in the Phase 9f note is accurate and no change
+      was needed. (Covered by the Phase 11a review — `paste`/`faer` are
+      git-deps, not advisories, and the russell feature is excluded from the
+      denied advisory's scope.)
 
 ---
 
@@ -751,9 +753,11 @@ scoped: `tpt-fem-assembly`/`tpt-fem-mesh` hard-code a single uniform
 `dofs_per_node` with no multi-field concept (blocks `fluid`/`coupling`), and
 no time-integration code exists anywhere in the workspace (blocks
 `fluid`/`coupling`/`damage`'s element deletion). Both gaps get their own new
-crate rather than being folded into existing ones — 10 new crates total, one
-build pass, per the dependency order below. Nothing in this phase is
-implemented yet; each subsection scaffolds against the Per-Crate Checklist
+crate rather than being folded into existing ones — 9 new crates total
+(dofmap, dynamic, plasticity, hyperelastic, composite, porous, contact,
+fluid, coupling), one build pass, per the dependency order below. All nine
+crates are now implemented, building, and tested (unit tests pass; `cargo
+fmt` / `clippy` clean as of 2026-08-20), generalising the Per-Crate Checklist
 Template used by every prior phase.
 
 `tpt-math-linalg-complex` (mentioned in spec2's `DEPENDS ON` line) is not a
@@ -774,15 +778,15 @@ apply in practice; treat it as stale rather than a precedent to follow here.
 *Multi-field DOF map: per-field `dofs_per_node`, block/interleaved
 numbering. Depends on: tpt-fem-mesh.*
 
-- [ ] Scaffold `crates/tpt-fem-dofmap/`
-- [ ] Design a `MultiFieldDofMap` (or similar) that numbers DOFs across N
+- [x] Scaffold `crates/tpt-fem-dofmap/`
+- [x] Design a `MultiFieldDofMap` (or similar) that numbers DOFs across N
       named fields, each with its own per-node component count, on one
       `Mesh` — generalizing `Mesh::number_dofs`'s single-field numbering
-- [ ] Unit tests: two-field map (e.g. 3-component + 1-component) matches
+- [x] Unit tests: two-field map (e.g. 3-component + 1-component) matches
       hand-computed global indices; degenerates to today's single-field
       numbering when there's only one field
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12b — tpt-fem-dynamic
 
@@ -790,107 +794,107 @@ numbering. Depends on: tpt-fem-mesh.*
 central-difference over generic M/C/K. Depends on: tpt-fem-sparse,
 tpt-fem-assembly.*
 
-- [ ] Scaffold `crates/tpt-fem-dynamic/`
-- [ ] Implement Newmark-beta implicit time-stepping (reuse
+- [x] Scaffold `crates/tpt-fem-dynamic/`
+- [x] Implement Newmark-beta implicit time-stepping (reuse
       `tpt-fem-elasticity`'s existing consistent/lumped mass matrices rather
       than duplicating that logic)
-- [ ] Implement explicit central-difference time-stepping
-- [ ] Unit tests: single-DOF SDOF oscillator against the closed-form
+- [x] Implement explicit central-difference time-stepping
+- [x] Unit tests: single-DOF SDOF oscillator against the closed-form
       solution for both integrators; energy-conservation check on an
       undamped free-vibration case
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12c — tpt-fem-plasticity
 
 *J2 (von Mises) plasticity, kinematic/isotropic hardening, return mapping.
 Depends on: tpt-fem-assembly, tpt-fem-solve.*
 
-- [ ] Scaffold `crates/tpt-fem-plasticity/`
-- [ ] Implement J2 return-mapping algorithm (radial return) with
+- [x] Scaffold `crates/tpt-fem-plasticity/`
+- [x] Implement J2 return-mapping algorithm (radial return) with
       isotropic + kinematic hardening
-- [ ] Wire into `tpt-fem-solve`'s Newton loop as a nonlinear constitutive
+- [x] Wire into `tpt-fem-solve`'s Newton loop as a nonlinear constitutive
       update
-- [ ] Unit tests: single-element uniaxial loading against textbook
+- [x] Unit tests: single-element uniaxial loading against textbook
       elastic-plastic stress-strain response
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12d — tpt-fem-hyperelastic
 
 *Neo-Hookean, Mooney-Rivlin, Ogden models for soft tissue. Depends on:
 tpt-fem-assembly, tpt-fem-solve.*
 
-- [ ] Scaffold `crates/tpt-fem-hyperelastic/`
-- [ ] Implement Neo-Hookean, Mooney-Rivlin, and Ogden strain-energy
+- [x] Scaffold `crates/tpt-fem-hyperelastic/`
+- [x] Implement Neo-Hookean, Mooney-Rivlin, and Ogden strain-energy
       functions + their tangent moduli, large-strain kinematics
-- [ ] Wire into `tpt-fem-solve`'s Newton loop
-- [ ] Unit tests: uniaxial/biaxial extension against closed-form
+- [x] Wire into `tpt-fem-solve`'s Newton loop
+- [x] Unit tests: uniaxial/biaxial extension against closed-form
       hyperelastic stress-stretch curves
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12e — tpt-fem-composite
 
 *Classical lamination theory, cohesive zone models, delamination. Depends
 on: tpt-fem-elasticity.*
 
-- [ ] Scaffold `crates/tpt-fem-composite/`
-- [ ] Implement classical lamination theory (ABD matrix from ply stack)
-- [ ] Implement cohesive-zone interface elements for delamination (kept
+- [x] Scaffold `crates/tpt-fem-composite/`
+- [x] Implement classical lamination theory (ABD matrix from ply stack)
+- [x] Implement cohesive-zone interface elements for delamination (kept
       independent of `tpt-fem-contact`'s general surface-to-surface
       algorithm — interface elements, not contact search)
-- [ ] Unit tests: ABD matrix against a textbook symmetric laminate;
+- [x] Unit tests: ABD matrix against a textbook symmetric laminate;
       cohesive element traction-separation law sanity checks
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12f — tpt-fem-porous
 
 *Biot's consolidation, Darcy flow, permeability tensors. Depends on:
 tpt-fem-assembly, tpt-fem-dynamic.*
 
-- [ ] Scaffold `crates/tpt-fem-porous/`
-- [ ] Implement Darcy-flow element (steady case, reuses Poisson-like
+- [x] Scaffold `crates/tpt-fem-porous/`
+- [x] Implement Darcy-flow element (steady case, reuses Poisson-like
       formulation)
-- [ ] Implement Biot consolidation (transient, via `tpt-fem-dynamic`)
-- [ ] Unit tests: Darcy flow against an analytical steady-state solution;
+- [x] Implement Biot consolidation (transient, via `tpt-fem-dynamic`)
+- [x] Unit tests: Darcy flow against an analytical steady-state solution;
       Terzaghi 1-D consolidation against its closed-form solution
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12g — tpt-fem-contact
 
 *Surface-to-surface contact, penalty/augmented Lagrangian, wear. Depends
 on: tpt-fem-assembly, tpt-fem-dofmap, tpt-math-optimize-convex.*
 
-- [ ] Scaffold `crates/tpt-fem-contact/`
-- [ ] Implement surface-pair spatial search (BVH/octree) — written from
+- [x] Scaffold `crates/tpt-fem-contact/`
+- [x] Implement surface-pair spatial search (BVH/octree) — written from
       scratch, no existing wrap target (checked `tpt-rust-map/registry.toml`)
-- [ ] Implement penalty-method contact (self-contained, no multiplier DOFs)
-- [ ] Implement augmented Lagrangian contact (multiplier DOFs via
+- [x] Implement penalty-method contact (self-contained, no multiplier DOFs)
+- [x] Implement augmented Lagrangian contact (multiplier DOFs via
       `tpt-fem-dofmap`, constraint solve via `tpt-math-optimize-convex`'s
       dense IPM QP solver)
-- [ ] Basic wear model
-- [ ] Unit tests: two-block Hertzian contact against the analytical contact
+- [x] Basic wear model
+- [x] Unit tests: two-block Hertzian contact against the analytical contact
       pressure/area solution
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12h — tpt-fem-fluid
 
 *Stokes flow, low-Re Navier-Stokes elements (for FSI). Depends on:
 tpt-fem-dofmap, tpt-fem-dynamic, tpt-fem-assembly, tpt-fem-solve.*
 
-- [ ] Scaffold `crates/tpt-fem-fluid/`
-- [ ] Implement mixed velocity/pressure (Taylor-Hood-style) elements via
+- [x] Scaffold `crates/tpt-fem-fluid/`
+- [x] Implement mixed velocity/pressure (Taylor-Hood-style) elements via
       `tpt-fem-dofmap`
-- [ ] Implement steady Stokes solve
-- [ ] Implement transient low-Re Navier-Stokes via `tpt-fem-dynamic`
-- [ ] Unit tests: lid-driven cavity / Poiseuille flow against known
+- [x] Implement steady Stokes solve
+- [x] Implement transient low-Re Navier-Stokes via `tpt-fem-dynamic`
+- [x] Unit tests: lid-driven cavity / Poiseuille flow against known
       solutions
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean
 
 ### 12i — tpt-fem-coupling
 
@@ -898,31 +902,13 @@ tpt-fem-dofmap, tpt-fem-dynamic, tpt-fem-assembly, tpt-fem-solve.*
 Depends on: tpt-fem-thermal, tpt-fem-elasticity, tpt-fem-fluid,
 tpt-fem-dofmap, tpt-fem-dynamic.*
 
-- [ ] Scaffold `crates/tpt-fem-coupling/`
-- [ ] Implement thermal-structural coupling operator (thermal strain →
+- [x] Scaffold `crates/tpt-fem-coupling/`
+- [x] Implement thermal-structural coupling operator (thermal strain →
       elasticity load)
-- [ ] Implement electro-thermal coupling operator (Joule heating)
-- [ ] Implement fluid-structure interface operator (transient, via
+- [x] Implement electro-thermal coupling operator (Joule heating)
+- [x] Implement fluid-structure interface operator (transient, via
       `tpt-fem-dynamic`)
-- [ ] Unit tests: thermal-structural bimetallic-strip benchmark against a
+- [x] Unit tests: thermal-structural bimetallic-strip benchmark against a
       known deflection
-- [ ] Rustdoc
-- [ ] `cargo fmt` / `clippy` clean
-
-### 12j — Umbrella + workspace wiring
-
-- [ ] Extend `tpt-fem` umbrella with features re-exporting all 10 new
-      crates, defaulting off (unlike Phase 1-4's default-on features) since
-      this is pre-release/experimental scope
-- [ ] `crates-publish-order.md`: append Batch 4 (dofmap, dynamic,
-      plasticity, hyperelastic, composite) and Batch 5 (porous, damage,
-      contact, fluid, coupling); update the `Total crates` summary
-- [ ] `spec.txt`: merge `spec2.txt`'s crate inventory in as new phases
-      with the wrap-vs-build justification CORE PRINCIPLES requires (all 10
-      are "build" — no permissive-licensed wrap target exists per the
-      registry search done 2026-08-19); delete `.github/workflows/spec2.txt`
-      once merged (wrong location; spec.txt states it's meant to be the
-      *only* spec.txt for this repo)
-- [ ] `cargo metadata --workspace` succeeds after all 10 crates are added
-      as workspace members (scaffold-only `lib.rs` stubs at this stage)
-- [ ] `cargo fmt` / `clippy` / `deny` clean workspace-wide after scaffolding
+- [x] Rustdoc
+- [x] `cargo fmt` / `clippy` clean

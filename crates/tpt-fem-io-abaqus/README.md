@@ -56,6 +56,13 @@ Element-type mapping:
 tpt-fem-mesh ──► tpt-fem-io-abaqus ──► Abaqus (.inp)
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `write_inp_demo` | `cargo run -p tpt-fem-io-abaqus --example write_inp_demo` | Build a mesh and export it to an Abaqus `.inp`, checking the deck markers. |
+| `read_inp_demo` | `cargo run -p tpt-fem-io-abaqus --example read_inp_demo` | Parse an Abaqus `.inp` deck and assert node/element counts and connectivity. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

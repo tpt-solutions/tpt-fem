@@ -16,6 +16,15 @@ members = [
     "crates/tpt-fem-mesh-gen",
     "crates/tpt-fem-cli",
     "crates/tpt-fem",
+    "crates/tpt-fem-dofmap",
+    "crates/tpt-fem-dynamic",
+    "crates/tpt-fem-plasticity",
+    "crates/tpt-fem-hyperelastic",
+    "crates/tpt-fem-composite",
+    "crates/tpt-fem-porous",
+    "crates/tpt-fem-contact",
+    "crates/tpt-fem-fluid",
+    "crates/tpt-fem-coupling",
 ]
 exclude = ["fuzz", "crates/tpt-fem-py"]
 
@@ -43,6 +52,15 @@ tpt-fem-io-abaqus = { version = "0.1.0", path = "crates/tpt-fem-io-abaqus" }
 tpt-fem-io-exodus = { version = "0.1.0", path = "crates/tpt-fem-io-exodus" }
 tpt-fem-mesh-gen = { version = "0.1.0", path = "crates/tpt-fem-mesh-gen" }
 tpt-fem = { version = "0.1.0", path = "crates/tpt-fem" }
+tpt-fem-dofmap = { version = "0.1.0", path = "crates/tpt-fem-dofmap" }
+tpt-fem-dynamic = { version = "0.1.0", path = "crates/tpt-fem-dynamic" }
+tpt-fem-plasticity = { version = "0.1.0", path = "crates/tpt-fem-plasticity" }
+tpt-fem-hyperelastic = { version = "0.1.0", path = "crates/tpt-fem-hyperelastic" }
+tpt-fem-composite = { version = "0.1.0", path = "crates/tpt-fem-composite" }
+tpt-fem-porous = { version = "0.1.0", path = "crates/tpt-fem-porous" }
+tpt-fem-contact = { version = "0.1.0", path = "crates/tpt-fem-contact" }
+tpt-fem-fluid = { version = "0.1.0", path = "crates/tpt-fem-fluid" }
+tpt-fem-coupling = { version = "0.1.0", path = "crates/tpt-fem-coupling" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
@@ -53,6 +71,8 @@ all = { level = "warn", priority = -1 }
 excessive_precision = "allow"
 # Index loops over small, fixed-size reference-element matrices are idiomatic here.
 needless_range_loop = "allow"
+# Physics solvers (time integration, FSI) legitimately take many parameters.
+too_many_arguments = "allow"
 
 [profile.release]
 opt-level = 3

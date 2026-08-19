@@ -1,0 +1,29 @@
+[package]
+name = "tpt-fem-coupling"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Multiphysics coupling operators (thermal-structural, electro-thermal, FSI) for tpt-fem."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "multiphysics", "coupling", "fsi"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-thermal = { workspace = true }
+tpt-fem-elasticity = { workspace = true }
+tpt-fem-fluid = { workspace = true }
+tpt-fem-assembly = { workspace = true }
+tpt-fem-dofmap = { workspace = true }
+tpt-fem-dynamic = { workspace = true }
+tpt-fem-mesh = { workspace = true }
+tpt-fem-sparse = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

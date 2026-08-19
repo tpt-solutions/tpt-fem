@@ -28,9 +28,20 @@ tpt-fem-eigen = { workspace = true, optional = true }
 tpt-fem-io-abaqus = { workspace = true, optional = true }
 tpt-fem-io-exodus = { workspace = true, optional = true }
 tpt-fem-mesh-gen = { workspace = true, optional = true }
+tpt-fem-dofmap = { workspace = true, optional = true }
+tpt-fem-dynamic = { workspace = true, optional = true }
+tpt-fem-plasticity = { workspace = true, optional = true }
+tpt-fem-hyperelastic = { workspace = true, optional = true }
+tpt-fem-composite = { workspace = true, optional = true }
+tpt-fem-porous = { workspace = true, optional = true }
+tpt-fem-contact = { workspace = true, optional = true }
+tpt-fem-fluid = { workspace = true, optional = true }
+tpt-fem-coupling = { workspace = true, optional = true }
 
 [features]
 default = ["quadrature", "element", "mesh", "sparse", "assembly", "thermal", "io-vtk", "elasticity", "solve", "eigen", "io-abaqus", "io-exodus", "mesh-gen"]
+# Phase 12 (advanced materials / contact / multiphysics) crates are experimental
+# and deliberately NOT enabled by default.
 quadrature = ["dep:tpt-fem-quadrature"]
 element = ["dep:tpt-fem-element"]
 mesh = ["dep:tpt-fem-mesh"]
@@ -44,6 +55,15 @@ eigen = ["dep:tpt-fem-eigen"]
 io-abaqus = ["dep:tpt-fem-io-abaqus"]
 io-exodus = ["dep:tpt-fem-io-exodus"]
 mesh-gen = ["dep:tpt-fem-mesh-gen"]
+dofmap = ["dep:tpt-fem-dofmap"]
+dynamic = ["dep:tpt-fem-dynamic"]
+plasticity = ["dep:tpt-fem-plasticity"]
+hyperelastic = ["dep:tpt-fem-hyperelastic"]
+composite = ["dep:tpt-fem-composite"]
+porous = ["dep:tpt-fem-porous"]
+contact = ["dep:tpt-fem-contact"]
+fluid = ["dep:tpt-fem-fluid"]
+coupling = ["dep:tpt-fem-coupling"]
 # Optional MUMPS/UMFPACK sparse-direct backend (large-scale solves). Forwards
 # to `tpt-fem-sparse`'s `russell` feature; requires the SuiteSparse/MUMPS
 # toolchain (see `russell_sparse`), so it is never enabled by default.

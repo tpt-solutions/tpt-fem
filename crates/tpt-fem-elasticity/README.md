@@ -70,6 +70,14 @@ let modes = solve_modal::<Tet4, _>(mesh, elastic_model, e, nu, n_modes);
 tpt-fem-assembly + tpt-fem-sparse + tpt-fem-eigen ──► tpt-fem-elasticity
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `bar_stiffness` | `cargo run -p tpt-fem-elasticity --example bar_stiffness` | Single axial-bar element stiffness vs. the analytic `EA/L [[1,-1],[-1,1]]`. |
+| `plane_stress_patch` | `cargo run -p tpt-fem-elasticity --example plane_stress_patch` | 4-triangle patch reproducing a linear displacement field exactly. |
+| `tri3_stiffness` | `cargo run -p tpt-fem-elasticity --example tri3_stiffness` | Tri3 plane-stress stiffness symmetry and rigid-body (zero row-sum) check. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

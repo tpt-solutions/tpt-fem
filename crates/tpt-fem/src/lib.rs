@@ -19,9 +19,20 @@
 //! | `io-abaqus`   | `tpt_fem_io_abaqus::*`          | `tpt-fem-io-abaqus`   |
 //! | `io-exodus`   | `tpt_fem_io_exodus::*`          | `tpt-fem-io-exodus`   |
 //! | `mesh-gen`    | `tpt_fem_mesh_gen::*`           | `tpt-fem-mesh-gen`    |
+//! | `dofmap`     | `tpt_fem_dofmap::*`            | `tpt-fem-dofmap`     |
+//! | `dynamic`    | `tpt_fem_dynamic::*`           | `tpt-fem-dynamic`     |
+//! | `plasticity` | `tpt_fem_plasticity::*`        | `tpt-fem-plasticity`  |
+//! | `hyperelastic` | `tpt_fem_hyperelastic::*`     | `tpt-fem-hyperelastic` |
+//! | `composite`  | `tpt_fem_composite::*`         | `tpt-fem-composite`   |
+//! | `porous`     | `tpt_fem_porous::*`            | `tpt-fem-porous`      |
+//! | `contact`    | `tpt_fem_contact::*`           | `tpt-fem-contact`     |
+//! | `fluid`      | `tpt_fem_fluid::*`             | `tpt-fem-fluid`       |
+//! | `coupling`   | `tpt_fem_coupling::*`          | `tpt-fem-coupling`    |
 //!
-//! All features are enabled by default. Each constituent's public API is
-//! documented in its own crate; see the module re-exports below.
+//! All Phase 1–4 features are enabled by default. The Phase 12 crates
+//! (`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`, `porous`,
+//! `contact`, `fluid`, `coupling`) are experimental and **off by default** —
+//! enable them explicitly with `--features`.
 //!
 //! The end-to-end pipeline — reference-element shape functions and gradients,
 //! quadrature, triplet assembly, and a sparse solve — is exercised by the
@@ -131,12 +142,26 @@ pub enum Error {
 
 #[cfg(feature = "assembly")]
 pub use tpt_fem_assembly::*;
+#[cfg(feature = "composite")]
+pub use tpt_fem_composite::*;
+#[cfg(feature = "contact")]
+pub use tpt_fem_contact::*;
+#[cfg(feature = "coupling")]
+pub use tpt_fem_coupling::*;
+#[cfg(feature = "dofmap")]
+pub use tpt_fem_dofmap::*;
+#[cfg(feature = "dynamic")]
+pub use tpt_fem_dynamic::*;
 #[cfg(feature = "eigen")]
 pub use tpt_fem_eigen::*;
 #[cfg(feature = "elasticity")]
 pub use tpt_fem_elasticity::*;
 #[cfg(feature = "element")]
 pub use tpt_fem_element::*;
+#[cfg(feature = "fluid")]
+pub use tpt_fem_fluid::*;
+#[cfg(feature = "hyperelastic")]
+pub use tpt_fem_hyperelastic::*;
 #[cfg(feature = "io-abaqus")]
 pub use tpt_fem_io_abaqus::*;
 #[cfg(feature = "io-exodus")]
@@ -147,6 +172,10 @@ pub use tpt_fem_io_vtk::*;
 pub use tpt_fem_mesh::*;
 #[cfg(feature = "mesh-gen")]
 pub use tpt_fem_mesh_gen::*;
+#[cfg(feature = "plasticity")]
+pub use tpt_fem_plasticity::*;
+#[cfg(feature = "porous")]
+pub use tpt_fem_porous::*;
 #[cfg(feature = "quadrature")]
 pub use tpt_fem_quadrature::*;
 #[cfg(feature = "solve")]
@@ -165,12 +194,26 @@ pub use tpt_fem_thermal::*;
 pub mod prelude {
     #[cfg(feature = "assembly")]
     pub use tpt_fem_assembly::*;
+    #[cfg(feature = "composite")]
+    pub use tpt_fem_composite::*;
+    #[cfg(feature = "contact")]
+    pub use tpt_fem_contact::*;
+    #[cfg(feature = "coupling")]
+    pub use tpt_fem_coupling::*;
+    #[cfg(feature = "dofmap")]
+    pub use tpt_fem_dofmap::*;
+    #[cfg(feature = "dynamic")]
+    pub use tpt_fem_dynamic::*;
     #[cfg(feature = "eigen")]
     pub use tpt_fem_eigen::*;
     #[cfg(feature = "elasticity")]
     pub use tpt_fem_elasticity::*;
     #[cfg(feature = "element")]
     pub use tpt_fem_element::*;
+    #[cfg(feature = "fluid")]
+    pub use tpt_fem_fluid::*;
+    #[cfg(feature = "hyperelastic")]
+    pub use tpt_fem_hyperelastic::*;
     #[cfg(feature = "io-abaqus")]
     pub use tpt_fem_io_abaqus::*;
     #[cfg(feature = "io-exodus")]
@@ -181,6 +224,10 @@ pub mod prelude {
     pub use tpt_fem_mesh::*;
     #[cfg(feature = "mesh-gen")]
     pub use tpt_fem_mesh_gen::*;
+    #[cfg(feature = "plasticity")]
+    pub use tpt_fem_plasticity::*;
+    #[cfg(feature = "porous")]
+    pub use tpt_fem_porous::*;
     #[cfg(feature = "quadrature")]
     pub use tpt_fem_quadrature::*;
     #[cfg(feature = "solve")]

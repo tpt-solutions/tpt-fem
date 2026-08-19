@@ -25,8 +25,17 @@ The workspace is a layered finite-element-method core; each crate has its own
 | Abaqus `.inp` reader/writer | `tpt-fem-io-abaqus` | `abaqus_import` |
 | Exodus II reader/writer (NetCDF-3) | `tpt-fem-io-exodus` | — |
 | Native 3-D tet mesh generation | `tpt-fem-mesh-gen` | `mesh_gen_box` |
+| DOF maps for multi-field problems | `tpt-fem-dofmap` | all examples |
+| Transient dynamics (Newmark) | `tpt-fem-dynamic` | all examples |
+| J2 (von Mises) plasticity, return mapping | `tpt-fem-plasticity` | `uniaxial_sweep` |
+| Hyperelastic models (Neo-Hookean, etc.) | `tpt-fem-hyperelastic` | all examples |
+| Composite / layered materials | `tpt-fem-composite` | all examples |
+| Poroelasticity / coupled flow–mechanics | `tpt-fem-porous` | all examples |
+| Contact & friction interface conditions | `tpt-fem-contact` | all examples |
+| Stokes / Navier–Stokes (penalty method) | `tpt-fem-fluid` | — |
+| Multi-physics coupling driver | `tpt-fem-coupling` | all examples |
 | Umbrella re-exports + prelude | `tpt-fem` | all examples |
-| Command-line driver | `tpt-fem-cli` | `tpt-fem init` / `solve` / `mesh` |
+| Command-line driver | `tpt-fem-cli` | — |
 | Python bindings (maturin/pyo3) | `tpt-fem-py` | `walkthrough.py` |
 
 ## Per-crate READMEs
@@ -44,6 +53,15 @@ The workspace is a layered finite-element-method core; each crate has its own
 - [tpt-fem-io-abaqus](../crates/tpt-fem-io-abaqus/README.md)
 - [tpt-fem-io-exodus](../crates/tpt-fem-io-exodus/README.md)
 - [tpt-fem-mesh-gen](../crates/tpt-fem-mesh-gen/README.md)
+- [tpt-fem-dofmap](../crates/tpt-fem-dofmap/README.md)
+- [tpt-fem-dynamic](../crates/tpt-fem-dynamic/README.md)
+- [tpt-fem-plasticity](../crates/tpt-fem-plasticity/README.md)
+- [tpt-fem-hyperelastic](../crates/tpt-fem-hyperelastic/README.md)
+- [tpt-fem-composite](../crates/tpt-fem-composite/README.md)
+- [tpt-fem-porous](../crates/tpt-fem-porous/README.md)
+- [tpt-fem-contact](../crates/tpt-fem-contact/README.md)
+- [tpt-fem-fluid](../crates/tpt-fem-fluid/README.md)
+- [tpt-fem-coupling](../crates/tpt-fem-coupling/README.md)
 - [tpt-fem (umbrella)](../crates/tpt-fem/README.md)
 - [tpt-fem-cli](../crates/tpt-fem-cli/README.md)
 - [tpt-fem-py](../crates/tpt-fem-py/README.md)

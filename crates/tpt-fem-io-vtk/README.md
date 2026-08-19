@@ -56,6 +56,13 @@ tpt_fem_io_vtk::write_vtk_with_data("result.vtu", &mesh, &[PointData::new("u", v
 tpt-fem-mesh ──► tpt-fem-io-vtk ──► ParaView / VTK tooling
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `write_vtk_demo` | `cargo run -p tpt-fem-io-vtk --example write_vtk_demo` | Build a mesh + field, inspect the VTK model, and write an ASCII `.vtk`. |
+| `round_trip` | `cargo run -p tpt-fem-io-vtk --example round_trip` | Write a mesh with point data and read it back, checking topology. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

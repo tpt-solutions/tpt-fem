@@ -560,7 +560,7 @@ fn hex20_shape_at(n: &[f64], x: f64, y: f64, z: f64) -> f64 {
         // `position` always finds a match. Contracted precondition (mirrors the
         // `mat_det`/`mat_inv` treatment, Phase 9b/10a; see `todo.md` 11b):
         // conversion to `Result` was deferred as the invariant is provable.
-        debug_assert!(n.iter().any(|v| *v == 0.0));
+        debug_assert!(n.contains(&0.0));
         match n.iter().position(|v| *v == 0.0).unwrap() {
             0 => 0.25 * (1.0 - x * x) * (1.0 + n[1] * y) * (1.0 + n[2] * z), // ξ = 0
             1 => 0.25 * (1.0 + n[0] * x) * (1.0 - y * y) * (1.0 + n[2] * z), // η = 0
@@ -590,7 +590,7 @@ fn hex20_grad_at(n: &[f64], x: f64, y: f64, z: f64) -> Vec<f64> {
         // `zeros != 0` guarantees exactly one coordinate is `0.0`; see the
         // `mat_det`/`mat_inv` contracted-precondition note (Phase 9b/10a,
         // `todo.md` 11b).
-        debug_assert!(n.iter().any(|v| *v == 0.0));
+        debug_assert!(n.contains(&0.0));
         match n.iter().position(|v| *v == 0.0).unwrap() {
             0 => vec![
                 -0.5 * x * (1.0 + n[1] * y) * (1.0 + n[2] * z),

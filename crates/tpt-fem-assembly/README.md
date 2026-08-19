@@ -69,6 +69,14 @@ apply_robin(&mut coo, &mut rhs, mesh, element_id, face_index, h, u_inf);
 tpt-fem-thermal / tpt-fem-elasticity ──► tpt-fem-assembly ──► tpt-fem-sparse
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `assemble_and_dirichlet` | `cargo run -p tpt-fem-assembly --example assemble_and_dirichlet` | Assembles a 2-element line and solves with Dirichlet ends, checking the linear solution. |
+| `neumann_load` | `cargo run -p tpt-fem-assembly --example neumann_load` | Applies a unit Neumann flux on a triangle and checks the total load equals the perimeter. |
+| `boundary_faces` | `cargo run -p tpt-fem-assembly --example boundary_faces` | Enumerates the four boundary edges of a square split into two triangles. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

@@ -1,0 +1,22 @@
+[package]
+name = "tpt-fem-dofmap"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Multi-field degree-of-freedom maps for tpt-fem (per-field dofs-per-node, block/interleaved numbering)."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "dof", "multi-field", "simulation"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-mesh = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

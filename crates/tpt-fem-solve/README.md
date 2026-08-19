@@ -68,6 +68,14 @@ let path = arc_length_continuation(&residual_at, &jacobian_at, &tangent, ArcLeng
 tpt-fem-assembly / tpt-fem-sparse ──► tpt-fem-solve (physics-agnostic)
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `newton_scalar` | `cargo run -p tpt-fem-solve --example newton_scalar` | Newton–Raphson root of `u³ - u - 1 = 0` (plastic number ≈ 1.3247). |
+| `continuation` | `cargo run -p tpt-fem-solve --example continuation` | Parameter continuation of `u² = λ` from λ = 1 to 4, checking `u = 2`. |
+| `arc_length` | `cargo run -p tpt-fem-solve --example arc_length` | Arc-length continuation through the fold of `u³ - 3u = λ`. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

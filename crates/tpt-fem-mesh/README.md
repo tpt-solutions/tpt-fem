@@ -68,6 +68,15 @@ tpt-fem-mesh ──► tpt-fem-assembly / tpt-fem-thermal / tpt-fem-elasticity
      └──► tpt-fem-io-* (readers/writers) and tpt-fem-mesh-gen
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `build_tri` | `cargo run -p tpt-fem-mesh --example build_tri` | Build a single `Tri3` mesh and assert its node/element counts and coordinates. |
+| `quad4_grid` | `cargo run -p tpt-fem-mesh --example quad4_grid` | Build a 2×2 `Quad4` grid and assert the derived node/element counts. |
+| `dof_numbering` | `cargo run -p tpt-fem-mesh --example dof_numbering` | Number DOFs per node and check the global system size and per-node lookups. |
+| `node_selectors` | `cargo run -p tpt-fem-mesh --example node_selectors` | Select nodes on a plane and inside a box and check the results. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

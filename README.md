@@ -166,6 +166,20 @@ structural/nonlinear, ecosystem-gap crates), Phase 5 error ergonomics &
 validation, Phase 6 physics completeness, and Phase 7–8 (CLI, MMS convergence
 suite, fuzz targets, Python bindings).
 
+## Examples
+
+Run with the umbrella crate's re-exported prelude (`use tpt_fem::prelude::*;`):
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `thermal_solve` | `cargo run -p tpt-fem --example thermal_solve` | Box-mesh Poisson solve and ParaView `.vtk` export. |
+| `modal_analysis` | `cargo run -p tpt-fem --example modal_analysis` | Natural-vibration modes of a clamped plate. |
+| `mesh_gen_box` | `cargo run -p tpt-fem --example mesh_gen_box` | Native tetrahedral box-mesh generation. |
+| `elasticity_frame` | `cargo run -p tpt-fem --example elasticity_frame` | 2-D Euler–Bernoulli frame cantilever. |
+| `abaqus_import` | `cargo run -p tpt-fem --example abaqus_import` | Round-trip an Abaqus `.inp` mesh import. |
+| `quadrature_demo` | `cargo run -p tpt-fem --example quadrature_demo` | Quadrature weights = area and shape-function partition of unity. |
+| `elasticity_bar_demo` | `cargo run -p tpt-fem --example elasticity_bar_demo` | Axial-bar element stiffness via the re-exported elasticity API. |
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at

@@ -64,6 +64,14 @@ let pairs = generalized_lanczos_eigs(&stiffness, &mass, EigWhich::SmallestMagnit
 tpt-fem-sparse ──► tpt-fem-eigen ──► tpt-fem-elasticity (modal)
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `power_iteration` | `cargo run -p tpt-fem-eigen --example power_iteration` | Dominant eigenpair of `[[2,1],[1,2]]` (λ = 3) with a residual check. |
+| `inverse_iteration` | `cargo run -p tpt-fem-eigen --example inverse_iteration` | Shift-invert eigenpair nearest 0 (λ = 1) of `[[2,1],[1,2]]`. |
+| `lanczos_1d_laplacian` | `cargo run -p tpt-fem-eigen --example lanczos_1d_laplacian` | Smallest eigenvalue of the 10-point 1-D Laplacian vs the closed-form value. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

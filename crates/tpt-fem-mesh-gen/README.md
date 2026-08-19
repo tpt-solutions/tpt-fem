@@ -73,6 +73,14 @@ let quality = tet_quality(&mesh);
 tpt-fem-mesh ◄── tpt-fem-mesh-gen (produces Tet meshes)
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `box_mesh_demo` | `cargo run -p tpt-fem-mesh-gen --example box_mesh_demo` | Structured box mesh; asserts node/element counts and positive orientation. |
+| `delaunay_cloud` | `cargo run -p tpt-fem-mesh-gen --example delaunay_cloud` | Delaunay tetrahedralisation of a cube corner cloud; checks counts and orientation. |
+| `tet_quality_demo` | `cargo run -p tpt-fem-mesh-gen --example tet_quality_demo` | Reports tetrahedral quality metrics and runs Laplacian smoothing. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

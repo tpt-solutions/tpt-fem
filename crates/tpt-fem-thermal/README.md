@@ -64,6 +64,14 @@ order 2 and `H1` order 1 rates.
 tpt-fem-quadrature + tpt-fem-element ──► tpt-fem-thermal ──► tpt-fem-assembly ──► tpt-fem-sparse
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `tri3_conductivity` | `cargo run -p tpt-fem-thermal --example tri3_conductivity` | Single Tri3 conductivity matrix vs. the hand-computed `k·A·(∇Nᵢ·∇Nⱼ)`. |
+| `steady_1d` | `cargo run -p tpt-fem-thermal --example steady_1d` | 1-D `-u'' = 1` Poisson solve converging to the analytic midpoint `0.125`. |
+| `quad4_stiffness` | `cargo run -p tpt-fem-thermal --example quad4_stiffness` | Quad4 conductivity matrix symmetry and rigid-body (zero row-sum) check. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

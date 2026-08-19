@@ -1,0 +1,25 @@
+[package]
+name = "tpt-fem-contact"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Surface-to-surface contact mechanics (penalty + augmented Lagrangian) for tpt-fem."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "contact", "penalty", "augmented-lagrangian"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-assembly = { workspace = true }
+tpt-fem-sparse = { workspace = true }
+tpt-fem-mesh = { workspace = true }
+tpt-fem-dofmap = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

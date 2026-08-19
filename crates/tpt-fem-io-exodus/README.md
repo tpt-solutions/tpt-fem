@@ -52,6 +52,13 @@ let mesh2 = bytes_to_mesh(&bytes)?;
 tpt-fem-mesh ──► tpt-fem-io-exodus ──► Exodus II / NetCDF
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `write_exodus_demo` | `cargo run -p tpt-fem-io-exodus --example write_exodus_demo` | Write a mesh to an Exodus II file and read it back, checking topology. |
+| `bytes_round_trip` | `cargo run -p tpt-fem-io-exodus --example bytes_round_trip` | Encode/decode a mesh through NetCDF-3 bytes and verify the round-trip. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or

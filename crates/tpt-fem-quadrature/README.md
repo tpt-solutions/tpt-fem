@@ -69,6 +69,14 @@ tpt-fem-quadrature  ──►  tpt-fem-element
        └──►  tpt-fem-thermal / tpt-fem-elasticity  ──►  tpt-fem-assembly
 ```
 
+## Examples
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `line_integral` | `cargo run -p tpt-fem-quadrature --example line_integral` | Integrates odd/even polynomials exactly on `[-1,1]` and `[0,1]` with Gauss–Legendre. |
+| `square_and_triangle` | `cargo run -p tpt-fem-quadrature --example square_and_triangle` | Checks tensor-product and reference-triangle rules against closed-form monomial integrals. |
+| `tetrahedron` | `cargo run -p tpt-fem-quadrature --example tetrahedron` | Verifies reference-tetrahedron weight sums and linear/quadratic moments. |
+
 ## License
 
 Licensed under either of [MIT](../../LICENSE-MIT) or
