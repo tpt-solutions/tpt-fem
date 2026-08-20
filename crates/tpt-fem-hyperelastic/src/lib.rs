@@ -17,7 +17,7 @@
 //! f[1][1] = lam.powf(-0.5);
 //! f[2][2] = lam.powf(-0.5);
 //! let p = 100.0 * lam.powf(-1.0);
-//! let pk = neo_hookean_piola(&f, 100.0, p);
+//! let pk = neo_hookean_piola(&f, 100.0, p).expect("F is invertible");
 //! let want = 100.0 * (lam - lam.powf(-2.0));
 //! assert!((pk[0][0] - want).abs() / want < 1e-12);
 //! ```
@@ -47,10 +47,14 @@ pub fn mat_det(m: &Mat3) -> f64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
-/// Inverse of a `3×3` matrix. Panics if singular.
-pub fn mat_inv(m: &Mat3) -> Mat3 {
+/// Inverse of a `3×3` matrix. Returns `None` if the matrix is (numerically)
+/// singular rather than panicking, so callers that may supply a degenerate
+/// deformation gradient (collapsed element) can handle it as an error.
+pub fn mat_inv(m: &Mat3) -> Option<Mat3> {
     let det = mat_det(m);
-    assert!(det.abs() > 1e-14, "mat_inv: singular matrix");
+    if det.abs() <= 1e-14 {
+        return None;
+    }
     let inv_det = 1.0 / det;
     let mut inv = [[0.0; 3]; 3];
     inv[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * inv_det;
@@ -62,7 +66,7 @@ pub fn mat_inv(m: &Mat3) -> Mat3 {
     inv[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * inv_det;
     inv[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * inv_det;
     inv[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * inv_det;
-    inv
+    Some(inv)
 }
 
 /// Transpose of a `3×3` matrix.
@@ -77,9 +81,9 @@ pub fn mat_transpose(m: &Mat3) -> Mat3 {
 }
 
 /// First Piola–Kirchhoff stress for the incompressible **Neo-Hookean** model,
-/// `P = μ F − p F^{-T}`.
-pub fn neo_hookean_piola(f: &Mat3, mu: f64, pressure: f64) -> Mat3 {
-    let finv = mat_inv(f);
+/// `P = μ F − p F^{-T}`. Returns `None` if `F` is singular.
+pub fn neo_hookean_piola(f: &Mat3, mu: f64, pressure: f64) -> Option<Mat3> {
+    let finv = mat_inv(f)?;
     let finvt = mat_transpose(&finv);
     let mut p = [[0.0; 3]; 3];
     for i in 0..3 {
@@ -87,18 +91,18 @@ pub fn neo_hookean_piola(f: &Mat3, mu: f64, pressure: f64) -> Mat3 {
             p[i][j] = mu * f[i][j] - pressure * finvt[i][j];
         }
     }
-    p
+    Some(p)
 }
 
 /// First Piola–Kirchhoff stress for the incompressible **Mooney–Rivlin** model,
 /// `P = 2 c₁ F + 2 c₂ (I₁ F − C F) − p F^{-T}` where `C = FᵀF` and
-/// `I₁ = tr(C)`.
-pub fn mooney_rivlin_piola(f: &Mat3, c1: f64, c2: f64, pressure: f64) -> Mat3 {
+/// `I₁ = tr(C)`. Returns `None` if `F` is singular.
+pub fn mooney_rivlin_piola(f: &Mat3, c1: f64, c2: f64, pressure: f64) -> Option<Mat3> {
     let ft = mat_transpose(f);
     let c = mat_mul(&ft, f);
     let i1 = c[0][0] + c[1][1] + c[2][2];
     let cf = mat_mul(&c, f);
-    let finv = mat_inv(f);
+    let finv = mat_inv(f)?;
     let finvt = mat_transpose(&finv);
     let mut p = [[0.0; 3]; 3];
     for i in 0..3 {
@@ -107,7 +111,7 @@ pub fn mooney_rivlin_piola(f: &Mat3, c1: f64, c2: f64, pressure: f64) -> Mat3 {
                 2.0 * c1 * f[i][j] + 2.0 * c2 * (i1 * f[i][j] - cf[i][j]) - pressure * finvt[i][j];
         }
     }
-    p
+    Some(p)
 }
 
 /// A single Ogden term `(μ_i, α_i)`.
@@ -166,16 +170,42 @@ pub fn neo_hookean_1d(f: f64, mu: f64) -> f64 {
     mu * (f - f.powi(-2))
 }
 
+/// Errors returned by the hyperelastic solvers.
+#[derive(Debug)]
+pub enum HyperelasticError {
+    /// The Newton iteration on the (large-strain) residual did not converge.
+    Newton(tpt_fem_solve::NewtonError),
+}
+
+impl std::fmt::Display for HyperelasticError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HyperelasticError::Newton(e) => {
+                write!(f, "hyperelastic bar Newton iteration failed: {e}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HyperelasticError {}
+
+impl From<tpt_fem_solve::NewtonError> for HyperelasticError {
+    fn from(e: tpt_fem_solve::NewtonError) -> Self {
+        HyperelasticError::Newton(e)
+    }
+}
+
 /// Solve a 1-D bar (built from `Line2` elements, one axial DOF per node) under a
 /// target end stretch using [`tpt-fem-solve`]'s Newton loop with the
 /// incompressible neo-Hookean response. Returns the displacement field whose
-/// rightmost node has been displaced to achieve the prescribed stretch.
+/// rightmost node has been displaced to achieve the prescribed stretch, or a
+/// [`HyperelasticError`] if the Newton iteration fails to converge.
 pub fn solve_hyperelastic_bar(
     mesh: &tpt_fem_mesh::Mesh,
     area: f64,
     mu: f64,
     target_stretch: f64,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, HyperelasticError> {
     let nnodes = mesh.node_count();
     let mut elem_len = Vec::with_capacity(mesh.elements.len());
     for elem in &mesh.elements {
@@ -228,7 +258,7 @@ pub fn solve_hyperelastic_bar(
         &dirichlet,
         &tpt_fem_solve::NewtonOptions::default(),
     )
-    .expect("Newton should converge on the neo-Hookean bar")
+    .map_err(HyperelasticError::from)
 }
 
 #[cfg(test)]
@@ -253,7 +283,7 @@ mod tests {
             f[2][2] = lam.powf(-0.5);
             let mu = 100.0;
             let p = mu * lam.powf(-1.0); // traction-free sides
-            let pk = neo_hookean_piola(&f, mu, p);
+            let pk = neo_hookean_piola(&f, mu, p).expect("F is invertible");
             let want = mu * (lam - lam.powf(-2.0));
             assert!(
                 (pk[0][0] - want).abs() / want < 1e-12,
@@ -280,7 +310,7 @@ mod tests {
             let _mu = 2.0 * (c1 + c2);
             // Traction-free sides give p = 2 c1 λ⁻¹ + 2 c2 (λ + λ⁻²).
             let p = 2.0 * c1 * lam.powf(-1.0) + 2.0 * c2 * (lam + lam.powf(-2.0));
-            let pk = mooney_rivlin_piola(&f, c1, c2, p);
+            let pk = mooney_rivlin_piola(&f, c1, c2, p).expect("F is invertible");
             let want = 2.0 * (lam - lam.powf(-2.0)) * (c1 + c2 * lam.powf(-1.0));
             assert!(
                 (pk[0][0] - want).abs() / want < 1e-12,
@@ -339,7 +369,8 @@ mod tests {
             prev = node;
         }
         let mesh = b.build();
-        let u = solve_hyperelastic_bar(&mesh, 1.0, 100.0, 1.5);
+        let u = solve_hyperelastic_bar(&mesh, 1.0, 100.0, 1.5)
+            .expect("hyperelastic bar solve must converge");
         // Rightmost node displacement = total length * 0.5 = 0.5.
         assert!((u[4] - 0.5).abs() < 1e-6);
         // Linear stretch -> uniform displacement field.

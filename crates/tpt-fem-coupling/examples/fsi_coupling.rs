@@ -111,7 +111,8 @@ fn main() {
             &interface,
             &struct_dirichlet,
             1.0e5, // fluid penalty
-        );
+        )
+        .expect("fsi coupling must solve");
         let du: f64 = u
             .iter()
             .zip(prev.iter())

@@ -52,11 +52,11 @@ fn main() {
         f[2][2] = lam.powf(-0.5);
 
         let p_nh = mu * lam.powf(-1.0);
-        let s_nh = neo_hookean_piola(&f, mu, p_nh)[0][0];
+        let s_nh = neo_hookean_piola(&f, mu, p_nh).expect("F is invertible")[0][0];
         let closed_nh = mu * (lam - lam.powf(-2.0));
 
         let p_mr = 2.0 * c1 * lam.powf(-1.0) + 2.0 * c2 * (lam + lam.powf(-2.0));
-        let s_mr = mooney_rivlin_piola(&f, c1, c2, p_mr)[0][0];
+        let s_mr = mooney_rivlin_piola(&f, c1, c2, p_mr).expect("F is invertible")[0][0];
         let closed_mr = 2.0 * (lam - lam.powf(-2.0)) * (c1 + c2 * lam.powf(-1.0));
 
         let lm = lam.powf(-0.5);

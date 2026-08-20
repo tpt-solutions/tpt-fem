@@ -99,15 +99,21 @@ pub fn augmented_lagrangian(
 }
 
 /// Brute-force nearest-node pairing between two surfaces `a` and `b` (each a
-/// list of `(node_id, coords)`). Returns, for every node in `a`, the index in
-/// `b` of its closest node together with the gap (signed distance). A full
-/// BVH/octree is a future optimisation; the O(|a|·|b|) scan is correct and
-/// dependency-free.
-pub fn contact_pairs(a: &[(usize, Vec<f64>)], b: &[(usize, Vec<f64>)]) -> Vec<(usize, usize, f64)> {
+/// list of `(node_id, coords)`).
+///
+/// For every node in `a`, returns `(node_id, Some((index_in_b, gap)))` for its
+/// closest node in `b`, or `(node_id, None)` if `b` is empty (there is nothing
+/// to pair with — callers must handle the `None` rather than indexing a
+/// sentinel). The scan is O(|a|·|b|) and dependency-free; a spatial acceleration
+/// structure (BVH/octree) is a future optimisation and the constraint
+/// enforcement below is independent of the search.
+pub fn contact_pairs(
+    a: &[(usize, Vec<f64>)],
+    b: &[(usize, Vec<f64>)],
+) -> Vec<(usize, Option<(usize, f64)>)> {
     let mut out = Vec::with_capacity(a.len());
     for (na, ca) in a.iter() {
-        let mut best = usize::MAX;
-        let mut best_d = f64::INFINITY;
+        let mut best: Option<(usize, f64)> = None;
         for (ib, (_nb, cb)) in b.iter().enumerate() {
             let d: f64 = ca
                 .iter()
@@ -115,12 +121,11 @@ pub fn contact_pairs(a: &[(usize, Vec<f64>)], b: &[(usize, Vec<f64>)]) -> Vec<(u
                 .map(|(x, y)| (x - y) * (x - y))
                 .sum::<f64>()
                 .sqrt();
-            if d < best_d {
-                best_d = d;
-                best = ib;
+            if best.map_or(true, |(_, bd)| d < bd) {
+                best = Some((ib, d));
             }
         }
-        out.push((*na, best, best_d));
+        out.push((*na, best));
     }
     out
 }
@@ -190,7 +195,19 @@ mod tests {
         let b = vec![(1usize, vec![1.0, 0.0]), (2usize, vec![0.1, 0.0])];
         let pairs = contact_pairs(&a, &b);
         assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].1, 1); // node 2 (index 1) is closest
-        assert!((pairs[0].2 - 0.1).abs() < 1e-12);
+        let (na, best) = &pairs[0];
+        assert_eq!(*na, 0);
+        let (ib, d) = best.expect("surface b is non-empty");
+        assert_eq!(ib, 1); // node 2 (index 1) is closest
+        assert!((d - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn contact_pairs_empty_surface_is_none() {
+        let a = vec![(0usize, vec![0.0, 0.0])];
+        let b: Vec<(usize, Vec<f64>)> = Vec::new();
+        let pairs = contact_pairs(&a, &b);
+        assert_eq!(pairs.len(), 1);
+        assert!(pairs[0].1.is_none());
     }
 }

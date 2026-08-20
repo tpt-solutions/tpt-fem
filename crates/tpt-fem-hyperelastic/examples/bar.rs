@@ -25,7 +25,8 @@ fn main() {
     let mu = 100.0;
     let area = 1.0;
     let target = 1.5;
-    let u = solve_hyperelastic_bar(&mesh, area, mu, target);
+    let u = solve_hyperelastic_bar(&mesh, area, mu, target)
+        .expect("hyperelastic bar solve must converge");
 
     let total_len = 1.0; // four elements of length 0.25
     let target_disp = total_len * (target - 1.0);

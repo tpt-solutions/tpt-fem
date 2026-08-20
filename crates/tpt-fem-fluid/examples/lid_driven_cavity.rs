@@ -68,7 +68,8 @@ fn main() {
     let bc = cavity_bc(&mesh);
     let penalty = 1e6;
 
-    let (u, p) = steady_stokes(&mesh, mu, |_| vec![0.0, 0.0], &bc, penalty);
+    let (u, p) = steady_stokes(&mesh, mu, |_| vec![0.0, 0.0], &bc, penalty)
+        .expect("steady Stokes cavity solve");
 
     println!("lid-driven cavity: {n} x {n} Quad4, mu = {mu}, u_lid = 1, penalty = {penalty:.0e}");
     println!("\nvertical centreline x = 0.5");
@@ -160,7 +161,8 @@ fn main() {
     let cbc = cavity_bc(&coarse);
     let mut last = (0.0, 0.0);
     for pen in [1e2, 1e3, 1e4, 1e5, 1e6] {
-        let (uc, _) = steady_stokes(&coarse, mu, |_| vec![0.0, 0.0], &cbc, pen);
+        let (uc, _) = steady_stokes(&coarse, mu, |_| vec![0.0, 0.0], &cbc, pen)
+            .expect("steady Stokes penalty-sweep solve");
         let mut mx = 0.0_f64;
         let mut my = 0.0_f64;
         for nd in 0..coarse.node_count() {

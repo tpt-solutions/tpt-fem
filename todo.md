@@ -654,29 +654,21 @@ been implemented yet — tracked for a future pass.*
 
 ### 11a — Bugs
 
-- [ ] `fuzz/Cargo.toml`: the `[dependencies.tpt-fem-io-abaqus]` block was
-      dropped (apparently while wiring up the new `vtk_import` `[[bin]]`),
-      but the pre-existing `abaqus_inp` `[[bin]]` target and its source
-      (`fuzz/fuzz_targets/abaqus_inp.rs:5`, `tpt_fem_io_abaqus::read_inp`)
-      still need it — `cargo +nightly build --bin abaqus_inp` will fail to
-      compile as committed, breaking both the `fuzz-build`
-      (`.github/workflows/ci.yml:106,109`) and `fuzz-run`
-      (`.github/workflows/ci.yml:135,138`) CI jobs, which still loop over
-      `abaqus_inp`. Fix: restore the `tpt-fem-io-abaqus` path dependency.
-- [ ] `todo.md:451-453` (Phase 9c) still records "`tpt-fem-io-vtk`: add a
-      real VTK reader" as unchecked/`**Deferred**`, but Phase 10c
-      (`todo.md:555-563`) already implemented and checked off exactly that
-      (`read_vtk`/`mesh_from_vtk`). The two entries now contradict each
-      other; mark 9c's line as superseded by 10c.
-- [ ] `deny.toml:7-9,20`: the `RUSTSEC-2024-0436` (`paste`, unmaintained)
-      suppression is justified in-comment as "pulled in transitively by
-      `faer`'s BLAS kernels" — but `faer` is no longer a dependency anywhere
-      in the workspace (no `faer` reference in any `Cargo.toml`) and `paste`
-      does not appear in `Cargo.lock` at all (`grep -c paste Cargo.lock` →
-      0). The suppression looks stale/dead — either the advisory no longer
-      applies and the `ignore` entry + comment can be dropped, or the
-      comment is wrong about why it's still needed and should be corrected.
-      Re-run `cargo deny check` after removing it to confirm.
+- [x] `fuzz/Cargo.toml`: the `[dependencies.tpt-fem-io-abaqus]` block is
+       present (`fuzz/Cargo.toml:22-23`) and `abaqus_inp.rs` uses
+       `tpt_fem_io_abaqus::read_inp`, so `cargo +nightly build --bin
+       abaqus_inp` and the `fuzz-build`/`fuzz-run` CI jobs compile. Verified
+       2026-08-20.
+- [x] `todo.md:451-453` (Phase 9c) records "`tpt-fem-io-vtk`: add a real
+       VTK reader" as superseded by Phase 10c (`read_vtk`/`mesh_from_vtk`),
+       which is checked off — the two entries are now consistent. Verified
+       2026-08-20.
+- [x] `deny.toml:7-9,20`: no `RUSTSEC-2024-0436` (`paste`, unmaintained)
+       suppression exists in the current `deny.toml` — `paste` does not appear
+       in `Cargo.lock` and `faer` is not a dependency anywhere, so the stale
+       entry described here is already absent. The only suppressions are the
+       three vtkio-transitive advisories (RUSTSEC-2026-0041/0194/0195),
+       matching the Phase 9f note. Verified 2026-08-20.
 
 ### 11b — Panic-risk hardening (library-facing, not test code)
 
@@ -869,8 +861,12 @@ tpt-fem-assembly, tpt-fem-dynamic.*
 on: tpt-fem-assembly, tpt-fem-dofmap, tpt-math-optimize-convex.*
 
 - [x] Scaffold `crates/tpt-fem-contact/`
-- [x] Implement surface-pair spatial search (BVH/octree) — written from
-      scratch, no existing wrap target (checked `tpt-rust-map/registry.toml`)
+- [x] Implement surface-pair nearest-node pairing — a brute-force O(|a|·|b|)
+       from-scratch scan (written from scratch, no existing wrap target;
+       checked `tpt-rust-map/registry.toml`), with a `contact_pairs` helper
+       that returns `Option` for an empty surface. A BVH/octree spatial
+       accelerator is a future optimisation; the constraint enforcement is
+       independent of the search.
 - [x] Implement penalty-method contact (self-contained, no multiplier DOFs)
 - [x] Implement augmented Lagrangian contact (multiplier DOFs via
       `tpt-fem-dofmap`, constraint solve via `tpt-math-optimize-convex`'s
@@ -912,3 +908,100 @@ tpt-fem-dofmap, tpt-fem-dynamic.*
       known deflection
 - [x] Rustdoc
 - [x] `cargo fmt` / `clippy` clean
+
+## Phase 13 — Platform Review Follow-ups (2026-08-20)
+
+*A fourth platform review (bugs/TODOs/missing features/innovation ideas),
+covering Phase 12's new experimental crates (dofmap, dynamic, plasticity,
+hyperelastic, composite, porous, contact, fluid, coupling). Nothing here has
+been implemented yet — tracked for a future pass.*
+
+### 13a — Bugs
+
+- [x] `todo.md:864` (Phase 12g) claimed "Implement surface-pair spatial
+       search (BVH/octree)" as done, but
+       `crates/tpt-fem-contact/src/lib.rs` implements only a
+       brute-force O(|a|·|b|) nearest-node scan — no BVH/octree exists.
+       Corrected the Phase 12g checklist entry to describe the brute-force
+       scan honestly (a BVH/octree remains a future optimisation).
+- [x] `crates/tpt-fem-contact/src/lib.rs` `contact_pairs` returned the
+       sentinel `best = usize::MAX` when surface `b` is empty instead of
+       `Option`/`Result` — a latent panic/index trap for any caller that
+       doesn't special-case an empty surface. It now returns `Option`
+       (`None` for an empty surface); `contact_pairs_empty_surface_is_none`
+       guards it.
+- [x] `crates/tpt-fem-porous/src/lib.rs` `terzaghi_consolidation`
+       uses backward-Euler (documented as unconditionally stable) but still
+       `assert!`s the *explicit*-scheme stability bound
+       `dt <= dz²/(2·cv)`, contradicting its own doc rationale and rejecting
+       legitimate large time steps for an implicit method. The assert is
+       removed and the doc now states the step is unconditionally stable.
+- [x] `crates/tpt-fem-dynamic/src/lib.rs` `central_difference` has no
+       CFL/critical-timestep check — an actually-conditionally-stable
+       explicit integrator that silently diverges above the stability limit
+       instead of erroring. It now returns `Result<_, DynamicError>` and
+       rejects (`DynamicError::CflViolation`) steps above `2/ω_max`;
+       `central_difference_rejects_over_cfl_step` guards it.
+- [x] `crates/tpt-fem-fluid/src/lib.rs` `transient_navier_stokes`'s Picard
+       loop runs a fixed `picard_iters` count with no residual/convergence
+       check — callers get no signal whether the nonlinear solve actually
+       converged. It now breaks early on convergence and returns
+       `Err(FluidError::PicardNotConverged)` otherwise. (`steady_stokes`
+       likewise returns `Result` — see 13b.)
+- [x] `crates/tpt-fem-coupling/src/lib.rs` `fsi_coupling` hardcodes
+       the fluid-structure interface normal to `+y` regardless of actual
+       interface geometry — wrong traction direction for curved/vertical
+       interfaces. It now uses a geometry-aware outward normal (average of
+       `node − incident-element-centroid`); still a lumped (smoke-level)
+       nodal-load projection, self-documented as such.
+
+### 13b — Panic-risk hardening (Phase 12 crates)
+
+- [x] `crates/tpt-fem-plasticity/src/lib.rs`
+       `solve_elastic_plastic_rod` `.expect("Newton should converge")` panics
+       for a perfectly-plastic material pushed past yield under force control
+       (documented singular-tangent case) instead of returning a `Result`.
+       It now returns `Result<_, PlasticityError>` (the `Newton` variant
+       carries the `NewtonError`).
+- [x] `crates/tpt-fem-hyperelastic/src/lib.rs` `mat_inv` panics on a
+       singular deformation gradient `F` (`det.abs() > 1e-14` assertion);
+       `neo_hookean_piola`/`mooney_rivlin_piola` call it directly, so a
+       degenerate/collapsed element panics the caller. `mat_inv` now returns
+       `Option` (and the two Piola functions return `Option`); a collapsed
+       element is handled as an error rather than a panic. `solve_hyperelastic_bar`
+       now returns `Result<_, HyperelasticError>` instead of `.expect()`-ing
+       Newton convergence.
+- [x] `crates/tpt-fem-fluid/src/lib.rs` `steady_stokes` and
+       `transient_navier_stokes` `.expect()` on `solve_with_dirichlet` —
+       panics for degenerate/under-constrained meshes (e.g. no Dirichlet BC
+       on a floating fluid domain) instead of returning a `Result`. Both now
+       return `Result<_, FluidError>` (the `Sparse` variant carries the
+       `SparseError`), consistent with the rest of the library.
+
+### 13c — Housekeeping
+
+- [x] `.github/workflows/spec2.txt` was misfiled inside `.github/workflows/`
+       alongside `ci.yml`/`python.yml` — it is the Phase 12 spec document and
+       belongs at the repo root next to `spec.txt`. Moved to `spec2.txt` at the
+       repo root.
+
+### 13d — Innovation ideas (not scoped, for future consideration)
+
+- [ ] BVH/octree contact spatial search (see 13a) — unlocks larger-scale
+      contact problems.
+- [ ] Adaptive mesh refinement (AMR) driven by a posteriori error
+      estimators — no crate currently does error-driven refinement.
+- [ ] Topology optimization module (SIMP/level-set) built on the existing
+      `tpt-fem-elasticity` + `tpt-fem-solve` stack.
+- [ ] GPU/SIMD-accelerated element assembly and sparse matvec — relevant
+      given the repeated per-step matvecs in `tpt-fem-dynamic`/`tpt-fem-fluid`
+      (also ties into the `coo_matvec` calling `to_csr()` on every invocation
+      performance smell in `tpt-fem-dynamic/src/lib.rs:64-79`).
+- [ ] WASM in-browser interactive solve+visualize demo —
+      `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
+      `wasm32-unknown-unknown` per CI.
+- [ ] Consistent (non-lumped) FSI load transfer with real per-node interface
+      normals, replacing the hardcoded `+y` normal (see 13a).
+- [ ] Modal frequency-response coupling: combine `tpt-fem-eigen` modal
+      analysis with `tpt-fem-dynamic` Newmark integration for a
+      vibration/fatigue frequency-response workflow.

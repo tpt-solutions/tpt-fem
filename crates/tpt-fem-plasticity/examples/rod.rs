@@ -60,7 +60,8 @@ fn main() {
 
     // Ramp from well below yield to 1.75x yield, in one continuous history.
     let loads: Vec<f64> = (1..=7).map(|k| 0.25 * k as f64 * p_y).collect();
-    let history = solve_elastic_plastic_rod(&mesh, area, &p, &loads);
+    let history =
+        solve_elastic_plastic_rod(&mesh, area, &p, &loads).expect("rod solve must converge");
 
     println!(
         "  {:<10} {:<14} {:<16} {:<16} {:<8}",

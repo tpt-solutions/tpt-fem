@@ -77,7 +77,8 @@ fn main() {
         })
         .expect("centre node");
 
-    let (u_steady, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty);
+    let (u_steady, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty)
+        .expect("steady Stokes reference solve");
     let steady_centre = u_steady[probe * 2];
 
     let dt = 0.01;

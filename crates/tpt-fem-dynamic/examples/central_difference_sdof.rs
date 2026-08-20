@@ -37,7 +37,8 @@ fn main() {
     println!("  chosen Δt    = {dt}");
 
     let opts = CentralOptions { dt };
-    let hist = central_difference(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
+    let hist = central_difference(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps)
+        .expect("central-difference step must stay within the CFL limit");
 
     let (t, u) = hist[nsteps].clone();
     let want = (omega * t).cos();

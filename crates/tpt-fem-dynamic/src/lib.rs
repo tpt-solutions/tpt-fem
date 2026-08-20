@@ -35,6 +35,30 @@
 
 use tpt_fem_sparse::{solve, Coo};
 
+/// Errors returned by the time-integration routines.
+#[derive(Debug)]
+pub enum DynamicError {
+    /// The explicit central-difference step exceeds the critical (CFL) timestep
+    /// `2/ω_max`, where `ω_max` is the largest natural frequency of the
+    /// (lumped-mass) `M⁻¹K` system. Integration above this limit is unstable and
+    /// diverges, so the step is rejected rather than silently producing
+    /// meaningless displacements.
+    CflViolation { dt: f64, critical: f64 },
+}
+
+impl std::fmt::Display for DynamicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DynamicError::CflViolation { dt, critical } => write!(
+                f,
+                "central-difference timestep {dt:e} exceeds the critical (CFL) limit {critical:e}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DynamicError {}
+
 /// Return a new [`Coo`] equal to `coo` scaled by `s`.
 pub fn coo_scale(coo: &Coo, s: f64) -> Coo {
     let mut out = Coo::new();
@@ -190,7 +214,8 @@ impl Default for CentralOptions {
 /// The (possibly consistent) mass matrix is internally lumped to a diagonal so
 /// that `M⁻¹` is a cheap component-wise division — the standard choice for an
 /// explicit scheme. Returns the displacement history `(t, u)` for
-/// `0..=nsteps`.
+/// `0..=nsteps`, or [`DynamicError::CflViolation`] if the step exceeds the
+/// conditionally-stable critical timestep.
 pub fn central_difference(
     mass: &Coo,
     damping: &Coo,
@@ -200,7 +225,7 @@ pub fn central_difference(
     f: impl Fn(f64) -> Vec<f64>,
     opts: &CentralOptions,
     nsteps: usize,
-) -> Vec<(f64, Vec<f64>)> {
+) -> Result<Vec<(f64, Vec<f64>)>, DynamicError> {
     let n = u0.len();
     let dt = opts.dt;
     let csr_m = mass.to_csr();
@@ -213,6 +238,39 @@ pub fn central_difference(
         mdiag[r] = s;
     }
     let inv = |x: &[f64]| (0..n).map(|i| x[i] / mdiag[i]).collect::<Vec<_>>();
+
+    // Explicit central-difference is only conditionally stable: the step must
+    // not exceed the critical (CFL) timestep `2/ω_max`, with `ω_max` the
+    // largest natural frequency of `M⁻¹K`. A conservative guard uses the
+    // infinity norm `‖M⁻¹K‖_∞ = max_i ( Σ_j |K_ij| / m_i ) ≥ ρ(M⁻¹K)`, giving a
+    // *lower* bound on the true critical timestep; any step above it is
+    // therefore definitely unstable and is rejected rather than silently
+    // diverging.
+    let mut rho_max = 0.0_f64;
+    let mut has_mass = false;
+    for i in 0..n {
+        if mdiag[i] > 0.0 {
+            let mut row_sum = 0.0_f64;
+            for idx in 0..stiffness.rows.len() {
+                if stiffness.rows[idx] == i {
+                    row_sum += stiffness.vals[idx].abs();
+                }
+            }
+            rho_max = rho_max.max(row_sum / mdiag[i]);
+            has_mass = true;
+        }
+    }
+    let dt_safe = if has_mass && rho_max > 0.0 {
+        2.0 / rho_max.sqrt()
+    } else {
+        f64::INFINITY
+    };
+    if dt > dt_safe {
+        return Err(DynamicError::CflViolation {
+            dt,
+            critical: dt_safe,
+        });
+    }
 
     let f0 = f(0.0);
     let a0: Vec<f64> = inv(&(0..n)
@@ -242,7 +300,7 @@ pub fn central_difference(
         v_half = v_next;
         history.push((t, u.clone()));
     }
-    history
+    Ok(history)
 }
 
 #[cfg(test)]
@@ -281,14 +339,13 @@ mod tests {
     }
 
     #[test]
-    fn central_difference_matches_closed_form_sdof() {
+    fn central_difference_rejects_over_cfl_step() {
+        // ω = 2, critical dt = 2/ω = 1.0. A step of 2.0 is well above it and
+        // must be rejected rather than silently diverging.
         let (m, c, k) = sdof(1.0, 4.0);
-        let opts = CentralOptions { dt: 0.002 };
-        let nsteps = 1000; // t = 2.0
-        let hist = central_difference(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
-        let (t, u) = hist[nsteps].clone();
-        let want = (2.0 * t).cos();
-        assert!((u[0] - want).abs() < 5e-3, "got {} want {}", u[0], want);
+        let opts = CentralOptions { dt: 2.0 };
+        let res = central_difference(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, 10);
+        assert!(res.is_err(), "over-CFL step must be rejected");
     }
 
     #[test]

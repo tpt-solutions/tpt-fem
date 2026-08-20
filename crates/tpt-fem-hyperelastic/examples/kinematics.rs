@@ -43,7 +43,7 @@ fn main() {
         j_closed * j_closed
     );
 
-    let finv = mat_inv(&f);
+    let finv = mat_inv(&f).expect("F is invertible");
     let prod = mat_mul(&f, &finv);
     println!("F·F⁻¹ =");
     for r in 0..3 {

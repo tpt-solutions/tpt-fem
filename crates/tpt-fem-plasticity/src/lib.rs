@@ -308,11 +308,41 @@ pub fn uniaxial_tangent_1d(params: &PlasticityParams, total_strain: f64, prev_ep
     }
 }
 
+/// Errors returned by the plasticity solvers.
+#[derive(Debug)]
+pub enum PlasticityError {
+    /// The coupled Newton iteration (per load step) did not converge. For a
+    /// perfectly-plastic material under force control this is a genuinely
+    /// singular tangent — the problem has no bounded solution past yield, so a
+    /// hard panic is replaced by a propagated error.
+    Newton(tpt_fem_solve::NewtonError),
+}
+
+impl std::fmt::Display for PlasticityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlasticityError::Newton(e) => {
+                write!(f, "elastic-plastic rod Newton iteration failed: {e}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PlasticityError {}
+
+impl From<tpt_fem_solve::NewtonError> for PlasticityError {
+    fn from(e: tpt_fem_solve::NewtonError) -> Self {
+        PlasticityError::Newton(e)
+    }
+}
+
 /// Solve a 1-D rod (built from `Line2` elements, one axial DOF per node) under a
 /// sequence of *force* loads `P` applied at the last node, with the first node
 /// fixed. Each load is solved with [`tpt-fem-solve`]'s Newton iteration using a
 /// per-element 1-D J2 (radial-return) plastic state and the consistent tangent.
-/// Returns the displacement vector at each load step.
+/// Returns the displacement vector at each load step, or a [`PlasticityError`]
+/// if the Newton iteration fails to converge (e.g. a perfectly-plastic rod
+/// pushed past yield under force control).
 ///
 /// Because the loading is force-controlled, the material must harden
 /// (`iso_hardening + kin_hardening > 0`) for loads beyond the yield force: a
@@ -323,7 +353,7 @@ pub fn solve_elastic_plastic_rod(
     area: f64,
     params: &PlasticityParams,
     loads: &[f64],
-) -> Vec<Vec<f64>> {
+) -> Result<Vec<Vec<f64>>, PlasticityError> {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -397,14 +427,13 @@ pub fn solve_elastic_plastic_rod(
             },
             &dirichlet,
             &opts,
-        )
-        .expect("Newton should converge on the rod problem");
+        )?;
         let (_, _, next) = assemble(&u_sol);
         *base.borrow_mut() = next;
         u = u_sol;
         history.push(u.clone());
     }
-    history
+    Ok(history)
 }
 
 #[cfg(test)]
@@ -665,7 +694,8 @@ mod tests {
         let a = 1.0;
         let p = PlasticityParams::steel();
         let p_load = 200e6 * a * 0.5; // half-yield force -> elastic
-        let history = solve_elastic_plastic_rod(&mesh, a, &p, &[p_load]);
+        let history =
+            solve_elastic_plastic_rod(&mesh, a, &p, &[p_load]).expect("rod solve must converge");
         let u = &history[0];
         let eps = (u[1] - u[0]) / 1.0;
         let want_eps = p_load / (p.young * a);
@@ -690,7 +720,8 @@ mod tests {
         let mesh = rod(4, 1.0);
         let p_y = p.yield_stress * area;
         let load = 1.3 * p_y;
-        let history = solve_elastic_plastic_rod(&mesh, area, &p, &[load]);
+        let history =
+            solve_elastic_plastic_rod(&mesh, area, &p, &[load]).expect("rod solve must converge");
         let u_end = *history[0].last().unwrap();
 
         // Uniform bar: σ = P/A, ε̄ᵖ = (σ − σ_y⁰)/H, ε = σ/E + ε̄ᵖ, u = ε·L.

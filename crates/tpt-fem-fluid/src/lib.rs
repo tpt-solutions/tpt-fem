@@ -56,7 +56,8 @@
 //!         bc.push((n * 2 + 1, 0.0));
 //!     }
 //! }
-//! let (u, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, 1e6);
+//! let (u, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, 1e6)
+//!     .expect("steady Stokes solve");
 //! // Sample an interior centreline node (y≈0.5) and compare with the analytic
 //! // value 0.125.
 //! let center: f64 = (0..mesh.node_count())
@@ -79,7 +80,50 @@ use tpt_fem_quadrature::{
     gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
     TriangleRule,
 };
-use tpt_fem_sparse::Coo;
+use tpt_fem_sparse::{Coo, SparseError};
+
+/// Errors returned by the fluid solvers.
+#[derive(Debug)]
+pub enum FluidError {
+    /// The underlying linear-algebra solve (velocity system, or a
+    /// Dirichlet-reduced step) failed.
+    Sparse(SparseError),
+    /// The Picard (fixed-point) iteration for the convective term did not reach
+    /// the convergence tolerance within the allowed number of re-linearisations.
+    PicardNotConverged {
+        /// Time step index at which the failure occurred.
+        step: usize,
+        /// Number of Picard iterations attempted.
+        iterations: usize,
+        /// Final relative change between successive Picard iterates.
+        residual: f64,
+    },
+}
+
+impl std::fmt::Display for FluidError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FluidError::Sparse(e) => write!(f, "fluid system solve failed: {e}"),
+            FluidError::PicardNotConverged {
+                step,
+                iterations,
+                residual,
+            } => write!(
+                f,
+                "Navier-Stokes Picard iteration did not converge at step {step} \
+                 after {iterations} iterations (relative change {residual:e})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FluidError {}
+
+impl From<SparseError> for FluidError {
+    fn from(e: SparseError) -> Self {
+        FluidError::Sparse(e)
+    }
+}
 
 /// Build the velocity(=dim)+pressure(=1) multi-field DOF map for `mesh`.
 ///
@@ -358,15 +402,19 @@ fn assemble_fluid(
 /// incompressibility more strongly at the cost of conditioning. Returns
 /// `(velocity, pressure)` each indexed by node (velocity is `dim` per node,
 /// concatenated as `node*dim + component`; pressure is one scalar per node).
+/// The velocity system is solved with [`tpt-fem-assembly`]'s Dirichlet
+/// reduction; a singular/under-constrained system (e.g. a floating fluid domain
+/// with no velocity Dirichlet condition) is surfaced as [`FluidError::Sparse`]
+/// rather than panicking.
 pub fn steady_stokes(
     mesh: &Mesh,
     viscosity: f64,
     body_force: impl Fn(&[f64]) -> Vec<f64>,
     velocity_bc: &[(usize, f64)],
     penalty: f64,
-) -> (Vec<f64>, Vec<f64>) {
+) -> Result<(Vec<f64>, Vec<f64>), FluidError> {
     let (k, _mass, rhs, dim) = assemble_fluid(mesh, viscosity, penalty, &body_force, velocity_bc);
-    let sol = solve_with_dirichlet(&k, &rhs, &[]).expect("stokes system must solve");
+    let sol = solve_with_dirichlet(&k, &rhs, &[])?;
     let nvel = mesh.node_count() * dim;
     let mut u = vec![0.0; nvel];
     for (i, g) in (0..nvel)
@@ -379,7 +427,7 @@ pub fn steady_stokes(
         u[d] = val;
     }
     let p = recover_pressure(mesh, &u, penalty, dim);
-    (u, p)
+    Ok((u, p))
 }
 
 /// Recover the pressure field `p = −(1/ε)·∇·u` from a velocity solution.
@@ -512,7 +560,14 @@ pub fn transient_stokes(
 /// advection-dominated flow.
 ///
 /// The flow starts from rest and `velocity_bc` is held fixed for all steps.
-/// Returns the final velocity field (`node*dim + component`).
+/// Returns the final velocity field (`node*dim + component`). The backward-Euler
+/// step system is solved with [`tpt-fem-assembly`]'s Dirichlet reduction (a
+/// singular/under-constrained system is surfaced as [`FluidError::Sparse`]).
+/// Each step's nonlinear convective term is driven by a Picard fixed-point
+/// iteration that breaks early on convergence; if it does not reach the
+/// tolerance within `picard_iters` re-linearisations the step fails with
+/// [`FluidError::PicardNotConverged`] rather than silently returning an
+/// unconverged field.
 pub fn transient_navier_stokes(
     mesh: &Mesh,
     viscosity: f64,
@@ -522,7 +577,7 @@ pub fn transient_navier_stokes(
     dt: f64,
     nsteps: usize,
     picard_iters: usize,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, FluidError> {
     let order = 2;
     let dim = match mesh.elements[0].cell_type {
         CellType::Line => Line2::DIM,
@@ -549,6 +604,10 @@ pub fn transient_navier_stokes(
         // Backward Euler evaluates the load at the end of the step.
         let t = (step + 1) as f64 * dt;
         let mut u_iter = u_prev.clone();
+        // Relative-change tolerance for Picard convergence.
+        let picard_tol = 1e-9;
+        let mut converged = false;
+        let mut last_change = 0.0_f64;
         for _ in 0..picard_iters.max(1) {
             // `stiff` = viscous + penalty + convection about `u_iter`;
             // `mass` = M/Δt. They are kept apart so that only `stiff` needs the
@@ -680,8 +739,7 @@ pub fn transient_navier_stokes(
                 rhsf[row] += s;
             }
 
-            let sol = solve_with_dirichlet(&kf, &rhsf, &[])
-                .expect("navier-stokes step system must solve");
+            let sol = solve_with_dirichlet(&kf, &rhsf, &[])?;
             let mut u = vec![0.0; nvel];
             for (i, &g) in free.iter().enumerate() {
                 u[g] = sol[i];
@@ -689,11 +747,32 @@ pub fn transient_navier_stokes(
             for &(d, val) in velocity_bc {
                 u[d] = val;
             }
+            // Relative change between successive Picard iterates; break early
+            // once the fixed point has settled.
+            let mut num = 0.0_f64;
+            let mut den = 0.0_f64;
+            for i in 0..u.len() {
+                num += (u[i] - u_iter[i]).powi(2);
+                den += u[i].powi(2);
+            }
+            last_change = num.sqrt();
+            let rel = last_change / (den.sqrt() + 1e-30);
             u_iter = u;
+            if rel < picard_tol {
+                converged = true;
+                break;
+            }
+        }
+        if !converged {
+            return Err(FluidError::PicardNotConverged {
+                step,
+                iterations: picard_iters.max(1),
+                residual: last_change,
+            });
         }
         u_prev = u_iter;
     }
-    u_prev
+    Ok(u_prev)
 }
 
 #[cfg(test)]
@@ -761,7 +840,8 @@ mod tests {
         let mu = 1.0;
         let g = 1.0;
         let bc = poiseuille_bc(&mesh, g, mu);
-        let (u, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, 1e6);
+        let (u, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, 1e6)
+            .expect("steady Stokes patch test must solve");
         let center: Vec<f64> = (0..mesh.node_count())
             .filter(|&n| (mesh.node_coords(n)[1] - 0.5).abs() < 1e-9)
             .map(|n| u[n * 2])
@@ -798,7 +878,8 @@ mod tests {
                 }
             }
         }
-        let (u, _p) = steady_stokes(&mesh, 1.0, |_| vec![0.0, 0.0], &bc, 1e6);
+        let (u, _p) = steady_stokes(&mesh, 1.0, |_| vec![0.0, 0.0], &bc, 1e6)
+            .expect("steady Stokes cavity solve");
         // The band 0.3 < y < 0.7 sits *below* the primary vortex centre, so the
         // horizontal velocity there is the return flow (u_x < 0); test its
         // magnitude, not its signed value.
@@ -861,7 +942,8 @@ mod tests {
         let g = 0.1;
         let bc = poiseuille_bc(&mesh, g, mu);
         // Small driving force => low Re; should settle near the Stokes profile.
-        let u = transient_navier_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, 1e3, 0.01, 60, 3);
+        let u = transient_navier_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, 1e3, 0.01, 60, 20)
+            .expect("low-Re Navier-Stokes solve");
         let center: Vec<f64> = (0..mesh.node_count())
             .filter(|&n| (mesh.node_coords(n)[1] - 0.5).abs() < 1e-9)
             .map(|n| u[n * 2])

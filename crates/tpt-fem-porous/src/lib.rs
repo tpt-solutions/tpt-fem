@@ -161,8 +161,9 @@ pub fn solve_darcy(
 ///
 /// * `cv` — consolidation coefficient `cᵥ = k·E_v / γ_w` (length²/time).
 /// * `ev` — 1-D drained modulus `E_v`.
-/// * `dt` — time step (must satisfy the explicit-stability limit
-///   `dt ≤ Δz² / (2·cᵥ)`; the routine asserts this).
+/// * `dt` — time step. The backward-Euler step is unconditionally stable, so
+///   there is no Courant-type restriction on `dt`; larger steps simply reduce
+///   the temporal accuracy.
 pub fn terzaghi_consolidation(
     mesh: &Mesh,
     q0: f64,
@@ -173,11 +174,7 @@ pub fn terzaghi_consolidation(
 ) -> Vec<(f64, f64, f64)> {
     // Uniform element length from the first element.
     let e0 = &mesh.elements[0];
-    let dz = (mesh.node_coords(e0.nodes[1])[0] - mesh.node_coords(e0.nodes[0])[0]).abs();
-    assert!(
-        dt <= dz * dz / (2.0 * cv),
-        "terzaghi: dt exceeds explicit stability limit"
-    );
+    let _dz = (mesh.node_coords(e0.nodes[1])[0] - mesh.node_coords(e0.nodes[0])[0]).abs();
 
     // Diffusion matrices: K = ∫ k ∇Nᵀ∇N, M = ∫ NᵀN. The Terzaghi equation is
     // ∂u/∂t = cᵥ ∂²u/∂z², whose FE form is M u̇ + cᵥ·K' u = 0 (K' = ∫∇Nᵀ∇N), so

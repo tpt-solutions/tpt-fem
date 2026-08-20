@@ -91,8 +91,10 @@ fn poiseuille_consistency() -> f64 {
             }
         }
         let u_ns =
-            transient_navier_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, penalty, 0.01, 60, 3);
-        let (u_st, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty);
+            transient_navier_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, penalty, 0.01, 60, 20)
+                .expect("low-Re Navier-Stokes solve");
+        let (u_st, _p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty)
+            .expect("steady Stokes reference solve");
         let exact = g / (8.0 * mu);
         let re = exact / mu; // rho = L = 1, U = peak velocity
         let err = (u_ns[probe * 2] - exact).abs();
@@ -145,14 +147,16 @@ fn cavity_sweep() {
     println!("   (return-flow extremum on the centreline x = 0.5)");
     println!("      Re      mu       y_min    u_x,min     vs Stokes");
     println!("   ------  -------   -------  ---------   -----------");
-    let (u_stokes, _p) = steady_stokes(&mesh, 1.0, |_| vec![0.0, 0.0], &bc, penalty);
+    let (u_stokes, _p) = steady_stokes(&mesh, 1.0, |_| vec![0.0, 0.0], &bc, penalty)
+        .expect("steady Stokes reference solve");
     let (y_st, ux_st) = extremum(&u_stokes);
     println!("      ->0  1.0e0    {y_st:7.3}  {ux_st:9.6}   (reference)");
     let mut last_delta = 0.0;
     for mu in [1.0, 0.1, 0.01] {
         let re = u_lid / mu; // rho = L = 1
         let u_ns =
-            transient_navier_stokes(&mesh, mu, |_, _| vec![0.0, 0.0], &bc, penalty, 0.05, 40, 3);
+            transient_navier_stokes(&mesh, mu, |_, _| vec![0.0, 0.0], &bc, penalty, 0.05, 40, 20)
+                .expect("low-Re Navier-Stokes cavity solve");
         let (y_ns, ux_ns) = extremum(&u_ns);
         last_delta = (ux_ns - ux_st).abs();
         println!(

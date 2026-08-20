@@ -20,8 +20,9 @@ fn main() {
 
     println!("Proximity search: surface A (x=0) vs surface B (x=0.25)");
     println!("  {:>6} {:>6} {:>10}", "node A", "node B", "gap");
-    for (na, ib, gap) in &pairs {
-        let nb = b[*ib].0;
+    for (na, best) in &pairs {
+        let (ib, gap) = best.expect("surface B is non-empty");
+        let nb = b[ib].0;
         println!("  {:6} {:6} {:10.4}", na, nb, gap);
         assert!((gap - 0.25).abs() < 1e-12, "gap must equal the x-offset");
     }

@@ -69,7 +69,8 @@ fn solve(nx: usize, ny: usize, g: f64, mu: f64, penalty: f64, verbose: bool) -> 
             bc.push((n * 2 + 1, 0.0)); // u_y
         }
     }
-    let (u, p) = steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty);
+    let (u, p) =
+        steady_stokes(&mesh, mu, |_| vec![g, 0.0], &bc, penalty).expect("steady Stokes solve");
 
     // Interior column at x = 0.5 (present whenever nx is even).
     let x_probe = 0.5;

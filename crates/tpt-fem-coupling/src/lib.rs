@@ -32,8 +32,52 @@
 //! ```
 
 use tpt_fem_assembly::{solve_with_dirichlet, try_assemble};
-use tpt_fem_elasticity::{elasticity_element_matrix, ElasticModel};
+use tpt_fem_elasticity::{elasticity_element_matrix, ElasticModel, ElasticityError};
 use tpt_fem_mesh::{CellType, Mesh};
+use tpt_fem_sparse::SparseError;
+
+/// Errors returned by the multiphysics coupling operators.
+#[derive(Debug)]
+pub enum CouplingError {
+    /// The underlying linear-algebra solve (structure system, or a
+    /// Dirichlet-reduced step) failed.
+    Sparse(SparseError),
+    /// Building or evaluating the elasticity operator failed (e.g. a
+    /// model/dimension mismatch).
+    Elasticity(ElasticityError),
+    /// The fluid (steady-Stokes) solve within the coupling failed.
+    Fluid(tpt_fem_fluid::FluidError),
+}
+
+impl std::fmt::Display for CouplingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CouplingError::Sparse(e) => write!(f, "coupling structure solve failed: {e}"),
+            CouplingError::Elasticity(e) => write!(f, "coupling elasticity operator failed: {e}"),
+            CouplingError::Fluid(e) => write!(f, "coupling fluid solve failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CouplingError {}
+
+impl From<SparseError> for CouplingError {
+    fn from(e: SparseError) -> Self {
+        CouplingError::Sparse(e)
+    }
+}
+
+impl From<ElasticityError> for CouplingError {
+    fn from(e: ElasticityError) -> Self {
+        CouplingError::Elasticity(e)
+    }
+}
+
+impl From<tpt_fem_fluid::FluidError> for CouplingError {
+    fn from(e: tpt_fem_fluid::FluidError) -> Self {
+        CouplingError::Fluid(e)
+    }
+}
 
 /// Solve the thermal-structural problem: free thermal expansion of an elastic body
 /// under a per-node temperature rise `delta_t[node]` (in Kelvin), coefficient of
@@ -135,9 +179,9 @@ pub fn electro_thermal(
 ///    interface (Newton's third law),
 /// 4. solves the structure with that traction as a Neumann load.
 ///
-/// Returns the updated structure displacement. It is intended to be driven
-/// inside a [`tpt-fem-dynamic`] loop by the caller (the transient coupling is a
-/// thin wrapper that re-solves the structure each fluid step).
+/// Returns the updated structure displacement, or a [`CouplingError`] if the
+/// fluid or structure solve fails (e.g. an under-constrained structure, or a
+/// model/dimension mismatch), instead of panicking.
 pub fn fsi_coupling(
     struct_mesh: &Mesh,
     fluid_mesh: &Mesh,
@@ -149,7 +193,7 @@ pub fn fsi_coupling(
     interface: &[(usize, usize)],
     struct_dirichlet: &[(usize, f64)],
     fluid_penalty: f64,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, CouplingError> {
     let dim = match struct_mesh.elements[0].cell_type {
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
@@ -214,24 +258,49 @@ pub fn fsi_coupling(
         },
         &fluid_bc,
         fluid_penalty,
-    );
+    )
+    .map_err(CouplingError::from)?;
 
     // Transfer fluid pressure as a normal traction onto the structure interface.
-    // Neumann load per node = pressure * normal (here normal = +y for top surface
-    // in 2-D; we use the local geometry's outward normal estimate).
+    // Neumann load per node = pressure * outward_normal. The normal is derived
+    // from the actual interface geometry: the average of (node - element
+    // centroid) over the structure elements incident on the interface node. For
+    // a convex/conforming mesh this points outward, so vertical or curved
+    // interfaces receive a correct (e.g. horizontal) traction direction rather
+    // than a hardcoded +y.
     let mut neumann = vec![0.0; struct_mesh.node_count() * dim];
     for &(s_node, f_node) in interface {
-        // Outward normal estimate from the structure mesh neighbour direction.
+        // Geometry-aware outward normal at the structure interface node.
         let c = struct_mesh.node_coords(s_node).to_vec();
-        let mut normal = vec![0.0; dim];
-        // Use the gradient of the pressure field proxy: simplest robust choice is
-        // the unit +y (top) / dominant coordinate for the interface.
-        if dim >= 2 {
-            normal[1] = 1.0;
+        let mut acc = vec![0.0; dim];
+        let mut n_elems = 0usize;
+        for elem in &struct_mesh.elements {
+            if elem.nodes.contains(&s_node) {
+                let mut xc = vec![0.0; dim];
+                for &nd in &elem.nodes {
+                    let cc = struct_mesh.node_coords(nd);
+                    for a in 0..dim {
+                        xc[a] += cc[a];
+                    }
+                }
+                for a in 0..dim {
+                    xc[a] /= elem.nodes.len() as f64;
+                    acc[a] += c[a] - xc[a];
+                }
+                n_elems += 1;
+            }
+        }
+        let mut normal = if n_elems > 0 { acc } else { vec![0.0; dim] };
+        let mag = normal.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if mag > 1e-12 {
+            for a in 0..dim {
+                normal[a] /= mag;
+            }
+        } else if dim >= 2 {
+            normal[1] = 1.0; // degenerate fallback
         } else {
             normal[0] = 1.0;
         }
-        let _ = c;
         for a in 0..dim {
             neumann[s_node * dim + a] += pressure[f_node] * normal[a];
         }
@@ -240,15 +309,14 @@ pub fn fsi_coupling(
     let k_full = try_assemble(struct_mesh, dim, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, 2)
     })
-    .map_err(|e| tpt_fem_sparse::SparseError::Numeric(e.to_string()))
-    .expect("fsi structure assemble");
+    .map_err(CouplingError::from)?;
     let mut rhs = vec![0.0; struct_mesh.node_count() * dim];
     // Convert the per-node nodal traction into consistent nodal loads by a simple
     // lumped projection (good for a smoke-level coupling check).
     for (i, v) in neumann.iter().enumerate() {
         rhs[i] += *v;
     }
-    solve_with_dirichlet(&k_full, &rhs, struct_dirichlet).expect("fsi structure solve")
+    solve_with_dirichlet(&k_full, &rhs, struct_dirichlet).map_err(CouplingError::from)
 }
 
 #[cfg(test)]
@@ -460,7 +528,8 @@ mod tests {
             &interface,
             &struct_dirichlet,
             1e6,
-        );
+        )
+        .expect("fsi coupling must solve");
         // The structure node must move (pressure traction transferred).
         assert!(
             u[s2 * 2 + 1].abs() > 0.0,

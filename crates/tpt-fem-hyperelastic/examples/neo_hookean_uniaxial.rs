@@ -26,7 +26,7 @@ fn main() {
         f[1][1] = lam.powf(-0.5);
         f[2][2] = lam.powf(-0.5);
         let p = mu * lam.powf(-1.0); // traction-free lateral faces
-        let pk = neo_hookean_piola(&f, mu, p);
+        let pk = neo_hookean_piola(&f, mu, p).expect("F is invertible");
         let closed = mu * (lam - lam.powf(-2.0));
         let err = (pk[0][0] - closed).abs() / closed.abs();
         println!(
