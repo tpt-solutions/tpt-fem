@@ -25,6 +25,8 @@ members = [
     "crates/tpt-fem-contact",
     "crates/tpt-fem-fluid",
     "crates/tpt-fem-coupling",
+    "crates/tpt-fem-modal",
+    "crates/tpt-fem-topopt",
 ]
 exclude = ["fuzz", "crates/tpt-fem-py"]
 
@@ -61,6 +63,8 @@ tpt-fem-porous = { version = "0.1.0", path = "crates/tpt-fem-porous" }
 tpt-fem-contact = { version = "0.1.0", path = "crates/tpt-fem-contact" }
 tpt-fem-fluid = { version = "0.1.0", path = "crates/tpt-fem-fluid" }
 tpt-fem-coupling = { version = "0.1.0", path = "crates/tpt-fem-coupling" }
+tpt-fem-modal = { version = "0.1.0", path = "crates/tpt-fem-modal" }
+tpt-fem-topopt = { version = "0.1.0", path = "crates/tpt-fem-topopt" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"

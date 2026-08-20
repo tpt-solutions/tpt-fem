@@ -33,7 +33,12 @@
 
 use tpt_fem_assembly::{solve_with_dirichlet, try_assemble};
 use tpt_fem_elasticity::{elasticity_element_matrix, ElasticModel, ElasticityError};
+use tpt_fem_element::{Hex8, Line2, Map, Quad4, ReferenceElement, Tet4, Tri3};
 use tpt_fem_mesh::{CellType, Mesh};
+use tpt_fem_quadrature::{
+    gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
+    TriangleRule,
+};
 use tpt_fem_sparse::SparseError;
 
 /// Errors returned by the multiphysics coupling operators.
@@ -176,7 +181,9 @@ pub fn electro_thermal(
 ///    kinematic condition),
 /// 2. solves [`tpt-fem-fluid`]'s steady Stokes for the fluid pressure,
 /// 3. transfers the fluid pressure as a normal traction onto the structure
-///    interface (Newton's third law),
+///    interface (Newton's third law), using a *consistent* (shape-weighted,
+///    non-lumped) load assembled through the interface elements' quadrature with
+///    a geometry-aware outward normal at each interface node,
 /// 4. solves the structure with that traction as a Neumann load.
 ///
 /// Returns the updated structure displacement, or a [`CouplingError`] if the
@@ -261,16 +268,23 @@ pub fn fsi_coupling(
     )
     .map_err(CouplingError::from)?;
 
-    // Transfer fluid pressure as a normal traction onto the structure interface.
-    // Neumann load per node = pressure * outward_normal. The normal is derived
-    // from the actual interface geometry: the average of (node - element
-    // centroid) over the structure elements incident on the interface node. For
-    // a convex/conforming mesh this points outward, so vertical or curved
-    // interfaces receive a correct (e.g. horizontal) traction direction rather
-    // than a hardcoded +y.
-    let mut neumann = vec![0.0; struct_mesh.node_count() * dim];
-    for &(s_node, f_node) in interface {
-        // Geometry-aware outward normal at the structure interface node.
+    // Consistent (non-lumped) traction transfer. The fluid pressure is projected
+    // onto the structure interface as a normal traction `t = p·n` and assembled
+    // as a *consistent* FEM nodal load `f_a = ∫_Ω N_a (p·n) dΩ` via the interface
+    // elements' reference quadrature, with both `p` and the geometry-aware
+    // outward normal `n` interpolated from their nodal values through the shape
+    // functions. This replaces the earlier lumped point-load projection and,
+    // because `n` is derived from the actual interface geometry (average of
+    // `node − incident-element-centroid`), curved or vertical interfaces receive
+    // a correct, shape-weighted traction direction rather than a hardcoded +y.
+    // (A strict surface-only mortar projection over the interface faces is a
+    // future refinement; integrating over the interface element is a consistent,
+    // smoke-level coupling load.)
+    let s_nodes: Vec<usize> = interface.iter().map(|&(s, _)| s).collect();
+
+    // Per interface-node geometry-aware outward normal.
+    let mut n_node = vec![vec![0.0; dim]; struct_mesh.node_count()];
+    for &s_node in &s_nodes {
         let c = struct_mesh.node_coords(s_node).to_vec();
         let mut acc = vec![0.0; dim];
         let mut n_elems = 0usize;
@@ -301,22 +315,98 @@ pub fn fsi_coupling(
         } else {
             normal[0] = 1.0;
         }
-        for a in 0..dim {
-            neumann[s_node * dim + a] += pressure[f_node] * normal[a];
+        n_node[s_node] = normal;
+    }
+
+    // Per interface-node fluid pressure gathered through the interface map.
+    let mut p_node = vec![0.0; struct_mesh.node_count()];
+    for &(s_node, f_node) in interface {
+        p_node[s_node] = pressure[f_node];
+    }
+
+    // Assemble the consistent nodal traction load via element quadrature.
+    let order = 2usize;
+    let mut rhs = vec![0.0; struct_mesh.node_count() * dim];
+    for elem in &struct_mesh.elements {
+        if !elem.nodes.iter().any(|n| s_nodes.contains(n)) {
+            continue;
+        }
+        let coords: Vec<Vec<f64>> = elem
+            .nodes
+            .iter()
+            .map(|n| struct_mesh.node_coords(*n).to_vec())
+            .collect();
+        let (pts, wts) = ref_quad(elem.cell_type, order);
+        for (xi, &w) in pts.iter().zip(&wts) {
+            let (n, g) = ref_shape_grad(elem.cell_type, xi);
+            let map = Map::from_nodes_and_grad(&coords, &g);
+            let detj = map.determinant.abs();
+            // Interpolate pressure and normal at this quadrature point.
+            let mut p = 0.0;
+            let mut nrm = vec![0.0; dim];
+            for (a, &node) in elem.nodes.iter().enumerate() {
+                p += n[a] * p_node[node];
+                for c in 0..dim {
+                    nrm[c] += n[a] * n_node[node][c];
+                }
+            }
+            // f_a += ∫ N_a (p·n) dΩ — consistent (shape-weighted), not lumped.
+            for (a, &node) in elem.nodes.iter().enumerate() {
+                for c in 0..dim {
+                    rhs[node * dim + c] += w * detj * n[a] * p * nrm[c];
+                }
+            }
         }
     }
-    // Solve the structure with the transferred traction as a Neumann load.
+
     let k_full = try_assemble(struct_mesh, dim, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, 2)
     })
     .map_err(CouplingError::from)?;
-    let mut rhs = vec![0.0; struct_mesh.node_count() * dim];
-    // Convert the per-node nodal traction into consistent nodal loads by a simple
-    // lumped projection (good for a smoke-level coupling check).
-    for (i, v) in neumann.iter().enumerate() {
-        rhs[i] += *v;
-    }
     solve_with_dirichlet(&k_full, &rhs, struct_dirichlet).map_err(CouplingError::from)
+}
+
+/// Reference shape-function values and gradients for the supported structure
+/// element types at local coordinates `xi`. Mirrors the dispatch used by
+/// `tpt-fem-elasticity` so the consistent load transfer reuses the same
+/// reference elements.
+fn ref_shape_grad(cell: CellType, xi: &[f64]) -> (Vec<f64>, Vec<Vec<f64>>) {
+    match cell {
+        CellType::Line => (Line2::shape(xi), Line2::grad(xi)),
+        CellType::Tri => (Tri3::shape(xi), Tri3::grad(xi)),
+        CellType::Quad => (Quad4::shape(xi), Quad4::grad(xi)),
+        CellType::Tet => (Tet4::shape(xi), Tet4::grad(xi)),
+        CellType::Hex => (Hex8::shape(xi), Hex8::grad(xi)),
+        other => panic!("fsi consistent load: unsupported cell {other:?}"),
+    }
+}
+
+/// Reference quadrature `(points, weights)` for the supported structure element
+/// types at the given rule `order`.
+fn ref_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
+    match cell {
+        CellType::Line => {
+            let r = gauss_legendre(order);
+            (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
+        }
+        CellType::Tri => {
+            let r = triangle(TriangleRule::Degree2);
+            (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
+        }
+        CellType::Quad => {
+            let r = tensor_square(&gauss_legendre(order));
+            (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
+        }
+        CellType::Tet => {
+            let r = tetrahedron(TetrahedronRule::Degree2);
+            (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
+        }
+        CellType::Hex => {
+            let r = tensor_cube(&gauss_legendre(order));
+            (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
+        }
+        other => panic!("fsi consistent load: unsupported cell {other:?}"),
+    }
 }
 
 #[cfg(test)]

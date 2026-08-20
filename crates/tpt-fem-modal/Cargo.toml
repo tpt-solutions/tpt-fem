@@ -1,0 +1,24 @@
+[package]
+name = "tpt-fem-modal"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Modal analysis + frequency-response / modal-superposition (combines tpt-fem-eigen with tpt-fem-dynamic)."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "modal", "frequency-response", "vibration"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-eigen = { workspace = true }
+tpt-fem-sparse = { workspace = true }
+tpt-fem-dynamic = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

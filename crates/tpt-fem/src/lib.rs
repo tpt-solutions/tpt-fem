@@ -172,6 +172,8 @@ pub use tpt_fem_io_vtk::*;
 pub use tpt_fem_mesh::*;
 #[cfg(feature = "mesh-gen")]
 pub use tpt_fem_mesh_gen::*;
+#[cfg(feature = "modal")]
+pub use tpt_fem_modal::*;
 #[cfg(feature = "plasticity")]
 pub use tpt_fem_plasticity::*;
 #[cfg(feature = "porous")]
@@ -184,6 +186,8 @@ pub use tpt_fem_solve::*;
 pub use tpt_fem_sparse::*;
 #[cfg(feature = "thermal")]
 pub use tpt_fem_thermal::*;
+#[cfg(feature = "topopt")]
+pub use tpt_fem_topopt::*;
 
 /// A curated, feature-gated prelude.
 ///
@@ -224,6 +228,8 @@ pub mod prelude {
     pub use tpt_fem_mesh::*;
     #[cfg(feature = "mesh-gen")]
     pub use tpt_fem_mesh_gen::*;
+    #[cfg(feature = "modal")]
+    pub use tpt_fem_modal::*;
     #[cfg(feature = "plasticity")]
     pub use tpt_fem_plasticity::*;
     #[cfg(feature = "porous")]
@@ -236,4 +242,6 @@ pub mod prelude {
     pub use tpt_fem_sparse::*;
     #[cfg(feature = "thermal")]
     pub use tpt_fem_thermal::*;
+    #[cfg(feature = "topopt")]
+    pub use tpt_fem_topopt::*;
 }

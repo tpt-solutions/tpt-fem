@@ -1,0 +1,22 @@
+[package]
+name = "tpt-fem-topopt"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SIMP topology optimization for 2-D linear elasticity on the tpt-fem stack."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "topology-optimization", "simp", "structural-optimization"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-sparse = { workspace = true }
+tpt-fem-assembly = { workspace = true }
+tpt-fem-element = { workspace = true }
+tpt-fem-quadrature = { workspace = true }
+
+[lints]
+workspace = true

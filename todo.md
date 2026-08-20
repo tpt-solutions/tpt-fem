@@ -713,15 +713,21 @@ been implemented yet — tracked for a future pass.*
       `ElasticitySolution`, `ModalSolution`, `ModeShape`) gets no static
       typing today. Worth a `.pyi` alongside the module once the bound API
       stabilizes.
-- [ ] `tpt-fem-solve`/`tpt-fem-eigen`: per `todo.md:303-310`/`:298-302`, the
-      arc-length continuation and generalized Lanczos eigensolver are only
-      verified against textbook/algebraic cases (an algebraic fold, a 2-bar
-      snap-through truss, and standard modal problems) — no test coverage of
-      near-singular/ill-conditioned inputs (e.g. a Jacobian close to
-      singular away from the tracked fold, or closely-clustered eigenvalues
-      stressing the shift-invert Lanczos restart). Low priority unless a
-      user hits a real convergence failure, but worth flagging since these
-      are the two most numerically delicate solvers in the workspace.
+- [x] `tpt-fem-solve`/`tpt-fem-eigen`: per `todo.md:303-310`/`:298-302`, the
+       arc-length continuation and generalized Lanczos eigensolver are only
+       verified against textbook/algebraic cases (an algebraic fold, a 2-bar
+       snap-through truss, and standard modal problems) — no test coverage of
+       near-singular/ill-conditioned inputs (e.g. a Jacobian close to
+       singular away from the tracked fold, or closely-clustered eigenvalues
+       stressing the shift-invert Lanczos restart). Low priority unless a
+       user hits a real convergence failure, but worth flagging since these
+       are the two most numerically delicate solvers in the workspace.
+       Addressed: `tpt-fem-solve`'s `arc_length_near_singular_tangent_
+       does_not_panic` traces a curve whose tangent is ill-conditioned
+       (stiffness `k = 1e-3`, far from any fold) without panicking, and
+       `tpt-fem-eigen`'s `generalized_lanczos_clustered_eigenvalues`
+       recovers two tightly-clustered eigenpairs (1 ± 1e-3) of a coupled
+       pencil with accurate Ritz vectors (`K x ≈ λ M x` residual < 1e-6).
 
 ### 11d — Revisit periodically
 
@@ -987,12 +993,24 @@ been implemented yet — tracked for a future pass.*
 
 ### 13d — Innovation ideas (not scoped, for future consideration)
 
-- [ ] BVH/octree contact spatial search (see 13a) — unlocks larger-scale
-      contact problems.
+- [x] BVH/octree contact spatial search (see 13a) — unlocks larger-scale
+       contact problems. Implemented: `crates/tpt-fem-contact/src/octree.rs`
+       provides a dependency-free, dimension-generic `Octree` (nearest-neighbour
+       query, amortised O(log n)), and `contact_pairs` now accelerates its
+       nearest-node pairing through it instead of the former O(|a|·|b|)
+       brute-force scan. Regression test `octree_matches_bruteforce` guards it.
 - [ ] Adaptive mesh refinement (AMR) driven by a posteriori error
       estimators — no crate currently does error-driven refinement.
-- [ ] Topology optimization module (SIMP/level-set) built on the existing
-      `tpt-fem-elasticity` + `tpt-fem-solve` stack.
+- [x] Topology optimization module (SIMP/level-set) built on the existing
+       `tpt-fem-elasticity` + `tpt-fem-solve` stack. Implemented:
+       `crates/tpt-fem-topopt/` — a self-contained SIMP minimum-compliance
+       optimizer (`topopt_simp`) with density filter and optimality-criteria
+       update on a `Quad4` grid, wired into the umbrella behind the `topopt`
+       feature (default-off, like the other Phase 12+ crates) and re-exported
+       via the prelude. Tests (`cantilever_lowers_compliance_and_keeps_volume`,
+       `full_volume_stays_solid`, `denser_initial_compliance_exceeds_optimized`)
+       verify the compliance decreases monotonically while the volume constraint
+       holds.
 - [ ] GPU/SIMD-accelerated element assembly and sparse matvec — relevant
       given the repeated per-step matvecs in `tpt-fem-dynamic`/`tpt-fem-fluid`
       (also ties into the `coo_matvec` calling `to_csr()` on every invocation
@@ -1000,8 +1018,22 @@ been implemented yet — tracked for a future pass.*
 - [ ] WASM in-browser interactive solve+visualize demo —
       `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
       `wasm32-unknown-unknown` per CI.
-- [ ] Consistent (non-lumped) FSI load transfer with real per-node interface
-      normals, replacing the hardcoded `+y` normal (see 13a).
-- [ ] Modal frequency-response coupling: combine `tpt-fem-eigen` modal
-      analysis with `tpt-fem-dynamic` Newmark integration for a
-      vibration/fatigue frequency-response workflow.
+- [x] Consistent (non-lumped) FSI load transfer with real per-node interface
+       normals, replacing the hardcoded `+y` normal (see 13a). Implemented in
+       `tpt-fem-coupling`'s `fsi_coupling`: the fluid pressure is projected as a
+       normal traction `t = p·n` and assembled as a *consistent* nodal load
+       `f_a = ∫ N_a (p·n) dΩ` through the interface elements' quadrature, with a
+       geometry-aware outward normal derived from `node −
+       incident-element-centroid`. (A strict surface-only mortar projection
+       remains a future refinement.)
+- [x] Modal frequency-response coupling: combine `tpt-fem-eigen` modal
+       analysis with `tpt-fem-dynamic` Newmark integration for a
+       vibration/fatigue frequency-response workflow. Implemented:
+       `crates/tpt-fem-modal/` — `modal_analysis` solves the generalized
+       eigenproblem (via `generalized_lanczos_eigs`), and `ModalData` offers
+       `frequency_response` (steady-state harmonic superposition) and
+       `modal_superposition` (time-domain via Newmark per modal coordinate).
+       Wired into the umbrella behind the `modal` feature (default-off) and
+       re-exported via the prelude. Doctest
+       `sdof_frequency_response_closed_form` and
+       `sdof_modal_superposition_matches_newmark` verify both paths.

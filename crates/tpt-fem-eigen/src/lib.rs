@@ -613,4 +613,50 @@ mod tests {
         assert!((vals[0] - 0.5).abs() < 1e-5, "got {}", vals[0]);
         assert!((vals[1] - 1.5).abs() < 1e-5, "got {}", vals[1]);
     }
+
+    #[test]
+    fn generalized_lanczos_clustered_eigenvalues() {
+        // Two eigenvalues tightly clustered near 1.0 (1 ± 1e-3) in a *coupled*
+        // block, plus two well-separated ones. The coupling keeps the Krylov
+        // start vector `[1,0,0,0]` off the eigenspace so the subspace does not
+        // collapse to one dimension. Shift-invert Lanczos must recover BOTH
+        // clustered values (not merge them into a single mode) and return
+        // accurate Ritz vectors. Regression for todo.md:716.
+        let b = 1e-3;
+        let mut k = Coo::new();
+        // Block [[1, b],[b, 1]] → eigenvalues 1±b, coupled so v0 is not an eigenvector.
+        k.push(0, 0, 1.0);
+        k.push(0, 1, b);
+        k.push(1, 0, b);
+        k.push(1, 1, 1.0);
+        k.push(2, 2, 3.0);
+        k.push(3, 3, 7.0);
+        let mut m = Coo::new();
+        for i in 0..4 {
+            m.push(i, i, 1.0);
+        }
+        let eigs = generalized_lanczos_eigs(&k, &m, 0.0, 2, 8).unwrap();
+        assert_eq!(eigs.len(), 2);
+        let mut lam: Vec<f64> = eigs.iter().map(|(l, _)| *l).collect();
+        lam.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((lam[0] - (1.0 - b)).abs() < 1e-4, "got {}", lam[0]);
+        assert!((lam[1] - (1.0 + b)).abs() < 1e-4, "got {}", lam[1]);
+        // Each Ritz vector must satisfy K x ≈ λ M x.
+        let kd = coo_to_dense(&k, 4);
+        let md = coo_to_dense(&m, 4);
+        for (l, x) in &eigs {
+            let kx: Vec<f64> = (0..4)
+                .map(|r| (0..4).map(|c| kd[r][c] * x[c]).sum())
+                .collect();
+            let mx: Vec<f64> = (0..4)
+                .map(|r| (0..4).map(|c| md[r][c] * x[c]).sum())
+                .collect();
+            let res = (0..4)
+                .map(|r| kx[r] - l * mx[r])
+                .map(|v| v * v)
+                .sum::<f64>()
+                .sqrt();
+            assert!(res < 1e-6, "eigenvector residual {res}");
+        }
+    }
 }
