@@ -1,5 +1,0 @@
-[tpt-fem-quadrature] exit=0 ::    Compiling tpt-fem-quadrature v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\target\package\tpt-fem-quadrature-0.1.0) |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
-[tpt-fem-sparse] exit=0 ::    Compiling tpt-fem-sparse v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\target\package\tpt-fem-sparse-0.1.0) |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.81s
-[tpt-fem-composite] exit=0 ::    Compiling tpt-fem-composite v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\target\package\tpt-fem-composite-0.1.0) |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.68s
-[tpt-fem-element] exit=101 ::   location searched: crates.io index |   required by package `tpt-fem-element v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-element)`
-[tpt-fem-mesh] exit=101 ::   location searched: crates.io index |   required by package `tpt-fem-mesh v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-mesh)`
