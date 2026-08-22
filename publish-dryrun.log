@@ -1,0 +1,33 @@
+===== tpt-fem-quadrature =====
+0
+   Uploading tpt-fem-quadrature v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-quadrature)
+warning: aborting upload due to dry run
+===== tpt-fem-sparse =====
+0
+   Uploading tpt-fem-sparse v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-sparse)
+warning: aborting upload due to dry run
+===== tpt-fem-composite =====
+0
+   Uploading tpt-fem-composite v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-composite)
+warning: aborting upload due to dry run
+===== tpt-fem-element =====
+101
+  location searched: crates.io index
+  required by package `tpt-fem-element v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-element)`
+===== tpt-fem-mesh =====
+101
+  location searched: crates.io index
+  required by package `tpt-fem-mesh v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-mesh)`
+===== tpt-fem-eigen =====
+101
+  location searched: crates.io index
+  required by package `tpt-fem-eigen v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-eigen)`
+===== tpt-fem-solve =====
+101
+  location searched: crates.io index
+  required by package `tpt-fem-solve v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-solve)`
+===== tpt-fem-mesh-gen =====
+101
+  location searched: crates.io index
+  required by package `tpt-fem-mesh-gen v0.1.0 (D:\Programming\1PRODUCTION\Open Source\tpt-fem\crates\tpt-fem-mesh-gen)`
+===== tpt-fem-io-vtk =====
