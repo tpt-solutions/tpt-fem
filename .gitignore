@@ -6,3 +6,5 @@ Cargo.lock
 Thumbs.db
 .vscode/
 .idea/
+
+*.log
