@@ -333,6 +333,12 @@ pub fn read_inp_deck(text: &str) -> Result<InpDeck, InpError> {
                     let last = parts[2]
                         .parse::<usize>()
                         .map_err(|_| InpError::Parse(format!("boundary dof: {line}")))?;
+                    // Dof indices are small (typically 1-6); reject absurd
+                    // ranges rather than allocating unbounded memory for a
+                    // malformed/adversarial `first, last` pair.
+                    if last < first || last - first > 1024 {
+                        return Err(InpError::Parse(format!("boundary dof range: {line}")));
+                    }
                     for d in first..=last {
                         boundary.push((id, d, value));
                     }
