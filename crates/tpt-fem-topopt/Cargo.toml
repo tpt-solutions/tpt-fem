@@ -1,0 +1,25 @@
+[package]
+name = "tpt-fem-topopt"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SIMP topology optimization (compliance minimisation) built on the tpt-fem elasticity stack."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "topology-optimization", "simp", "structural"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-sparse = { workspace = true }
+tpt-fem-mesh = { workspace = true }
+tpt-fem-assembly = { workspace = true }
+tpt-fem-elasticity = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true
