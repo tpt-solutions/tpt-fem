@@ -13,7 +13,7 @@ keywords = ["sparse-matrix", "csr", "linear-algebra", "fem", "solver"]
 categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
-tpt-math-linalg-dense = { git = "https://github.com/tpt-solutions/tpt-math", package = "tpt-math-linalg-dense" }
+tpt-math-linalg-dense = "0.1.0"
 # Optional sparse-direct backend. `russell_sparse` wraps MUMPS/UMFPACK and its
 # build downloads + compiles SuiteSparse (Fortran/C toolchain required); it is
 # therefore *not* enabled by default and only compiled where that toolchain

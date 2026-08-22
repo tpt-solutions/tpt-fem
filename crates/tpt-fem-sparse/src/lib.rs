@@ -325,7 +325,7 @@ mod russell {
             )));
         }
         let rc = to_russell_coo(coo)?;
-        let b = Vector::from(rhs);
+        let b = Vector::from(&rhs);
         let mut x = Vector::new(n);
         LinSolver::compute(genie, &mut x, &rc, &b, None)
             .map_err(|e| SparseError::Numeric(e.to_string()))?;
