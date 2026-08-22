@@ -34,6 +34,11 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # `--all-features` pulls in `tpt-fem-sparse/russell`, which needs the
+      # OpenBLAS/LAPACK C headers (`cblas.h`, `lapacke.h`) to compile its FFI
+      # shim; ubuntu-latest doesn't ship them by default.
+      - name: Install OpenBLAS/LAPACK dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapacke-dev
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
@@ -42,6 +47,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install OpenBLAS/LAPACK dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapacke-dev
       - run: cargo test --workspace --all-features
 
   docs:
@@ -52,6 +59,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install OpenBLAS/LAPACK dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapacke-dev
       - run: cargo doc --workspace --no-deps --all-features
 
   # wasm32 target check. The pure-math crates (quadrature/element/mesh) must
@@ -162,4 +171,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p tpt-fem-thermal --features mesh-gen -- --ignored mms_3d_converges
+      - run: cargo test -p tpt-fem-thermal -- --ignored mms_3d_converges
