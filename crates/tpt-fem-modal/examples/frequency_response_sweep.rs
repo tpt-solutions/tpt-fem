@@ -37,7 +37,6 @@ fn main() {
     let m = sym(&[(0, 0, 1.0), (1, 1, 1.0)]);
     let k = sym(&[(0, 0, 2.0), (1, 1, 1.0), (0, 1, -1.0)]);
 
-
     // Modal analysis: both modes, ζ = 0.02 modal damping.
     let data = modal_analysis(&k, &m, 0.0, 2, 8, 0.02).unwrap();
     println!("Natural frequencies:");
@@ -47,9 +46,7 @@ fn main() {
 
     // Harmonic tip force F = (1, 0), sweep Ω across the band.
     let forces = [1.0, 0.0];
-    let freqs: Vec<f64> = (0..=160)
-        .map(|i| 0.01 + i as f64 * (2.4 / 160.0))
-        .collect();
+    let freqs: Vec<f64> = (0..=160).map(|i| 0.01 + i as f64 * (2.4 / 160.0)).collect();
     let resp = data.frequency_response(&m, &forces, &freqs);
 
     // Locate resonance peaks in |U_1(Ω)|.
@@ -72,7 +69,10 @@ fn main() {
     // Off-resonance check: far below the first mode the response approaches
     // the static stiffness solution K⁻¹ F.
     let static_amp = amp(&resp[0], 0);
-    println!("\nQuasi-static |U_1| at Ω = {:.3}: {:.6}", resp[0].frequency, static_amp);
+    println!(
+        "\nQuasi-static |U_1| at Ω = {:.3}: {:.6}",
+        resp[0].frequency, static_amp
+    );
 
     // Damped response stays bounded at resonance (no singularity).
     for r in &resp {

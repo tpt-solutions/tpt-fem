@@ -22,7 +22,16 @@ ignore = [
     # `russell_sparse`'s legacy CLI example binary. No safe upgrade exists
     # upstream (russell_sparse has not migrated to clap), tpt-fem never uses
     # structopt directly, and it does not affect runtime behavior or safety.
-    { crate = "structopt", reason = "unmaintained transitive dep of russell_sparse; no safe upgrade available" },
+    # `structopt` and its transitive deps (`clap 2` -> `ansi_term`, `atty`,
+    # `proc-macro-error`) are flagged as unmaintained; they are reachable only
+    # through `russell_sparse`'s legacy CLI example binary. No safe upgrade
+    # exists upstream (russell_sparse has not migrated to clap), tpt-fem never
+    # uses structopt directly, and none of these affect runtime behavior or
+    # safety.
+    "RUSTSEC-2022-0104", # structopt in maintenance mode
+    "RUSTSEC-2021-0139", # ansi_term unmaintained (via clap 2)
+    "RUSTSEC-2024-0375", # atty unmaintained (via clap 2)
+    "RUSTSEC-2024-0370", # proc-macro-error unmaintained (via structopt derive)
 ]
 
 [licenses]

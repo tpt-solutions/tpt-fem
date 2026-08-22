@@ -50,7 +50,10 @@ fn main() {
     println!("  det J = {:.6}", m.determinant);
     // dx/dxi = a/2 = (2, 0) and dx/deta = b/2 = (1/2, 1), so
     // det J = 2·1 − 0·(1/2) = 2 everywhere on this affine map.
-    assert!((m.determinant - 2.0).abs() < 1e-12, "affine map must have constant det J = 2");
+    assert!(
+        (m.determinant - 2.0).abs() < 1e-12,
+        "affine map must have constant det J = 2"
+    );
 
     // Map a reference gradient dN/dxi = (1, 0) into physical coordinates:
     // dN/dx = (dN/dxi) · J⁻¹.

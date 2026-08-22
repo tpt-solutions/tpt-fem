@@ -17,19 +17,22 @@ fn main() {
 
     let params = TopOptParams {
         grid: grid.clone(),
-        e0: 1.0,           // solid Young's modulus
-        nu: 0.3,           // Poisson's ratio
-        vol_frac: 0.5,     // keep 50% of the material
-        penal: 3.0,        // SIMP penalty
-        filter_radius: 2.4,// sensitivity filter radius (in elements)
+        e0: 1.0,            // solid Young's modulus
+        nu: 0.3,            // Poisson's ratio
+        vol_frac: 0.5,      // keep 50% of the material
+        penal: 3.0,         // SIMP penalty
+        filter_radius: 2.4, // sensitivity filter radius (in elements)
         max_iter: 30,
         move_limit: 0.2,
     };
 
     let res = topopt_simp(&params, &f, &bcs).unwrap();
 
-    println!("SIMP cantilever, {} elements, target volume fraction {}",
-        grid.n_elem(), params.vol_frac);
+    println!(
+        "SIMP cantilever, {} elements, target volume fraction {}",
+        grid.n_elem(),
+        params.vol_frac
+    );
     println!("\nCompliance history:");
     for (it, c) in res.compliance.iter().enumerate() {
         println!("  iter {:>2}: c = {:.6e}", it + 1, c);
@@ -45,7 +48,11 @@ fn main() {
     for ej in (0..ny).rev() {
         let row: String = (0..nx)
             .map(|ei| {
-                if res.densities[ej * nx + ei] > 0.5 { '#' } else { '.' }
+                if res.densities[ej * nx + ei] > 0.5 {
+                    '#'
+                } else {
+                    '.'
+                }
             })
             .collect();
         println!("  {row}");

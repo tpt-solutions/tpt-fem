@@ -54,7 +54,6 @@ fn main() {
         })
         .collect();
 
-
     println!("Free vibration of the 2-DOF chain (ζ = 0):");
     println!("  {:>8}  {:>14}  {:>14}", "t", "u1 numeric", "u1 analytic");
     for step in [0usize, 250, 500, 750, 1000] {
@@ -72,10 +71,7 @@ fn main() {
 
     // Energy sanity: undamped free vibration conserves energy, so the response
     // amplitude cannot grow.
-    let max_abs_u1 = hist
-        .iter()
-        .map(|(_, u)| u[0].abs())
-        .fold(0.0_f64, f64::max);
+    let max_abs_u1 = hist.iter().map(|(_, u)| u[0].abs()).fold(0.0_f64, f64::max);
     assert!(max_abs_u1 < 1.0 + 1e-6 + 2.0); // generous bound; no blow-up
     println!("\nmax |u₁(t)| = {:.6} over t ∈ [0, 2]", max_abs_u1);
     println!("Modal superposition matches the closed form within Newmark accuracy.");

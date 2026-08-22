@@ -22,7 +22,10 @@ fn main() {
     // Partition of unity at a set of interior points.
     for p in [[0.2_f64, 0.3], [0.5, 0.1], [0.25, 0.25]] {
         let sum: f64 = Tri3::shape(&p).iter().sum();
-        assert!((sum - 1.0).abs() < 1e-12, "partition of unity failed at {p:?}");
+        assert!(
+            (sum - 1.0).abs() < 1e-12,
+            "partition of unity failed at {p:?}"
+        );
     }
 
     // Kronecker delta: N_j(node i) = δ_ij.
@@ -51,7 +54,11 @@ fn main() {
     let nodes6 = Tri6::nodes();
     let x_nodal: Vec<f64> = nodes6.iter().map(|n| n[0]).collect();
     for p in [[0.15_f64, 0.4], [0.4, 0.2], [1.0 / 3.0, 1.0 / 3.0]] {
-        let interp: f64 = Tri6::shape(&p).iter().zip(&x_nodal).map(|(n, x)| n * x).sum();
+        let interp: f64 = Tri6::shape(&p)
+            .iter()
+            .zip(&x_nodal)
+            .map(|(n, x)| n * x)
+            .sum();
         assert!(
             (interp - p[0]).abs() < 1e-12,
             "P2 must reproduce linear fields: got {interp}, want {}",

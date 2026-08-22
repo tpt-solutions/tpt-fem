@@ -14,8 +14,14 @@ fn main() {
     let grid = Grid::new(21, 11, 1.0);
     let (f, bcs) = cantilever_load(&grid, 1.0);
 
-    println!("Cantilever compliance vs. allowed volume ({} elements):\n", grid.n_elem());
-    println!("  {:>8}  {:>14}  {:>10}", "vol_frac", "compliance", "vs. solid");
+    println!(
+        "Cantilever compliance vs. allowed volume ({} elements):\n",
+        grid.n_elem()
+    );
+    println!(
+        "  {:>8}  {:>14}  {:>10}",
+        "vol_frac", "compliance", "vs. solid"
+    );
 
     let mut baseline = None;
     for &vf in &[0.9_f64, 0.7, 0.5, 0.35, 0.25] {
