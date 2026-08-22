@@ -39,6 +39,7 @@ tpt-fem-fluid = { workspace = true, optional = true }
 tpt-fem-coupling = { workspace = true, optional = true }
 tpt-fem-modal = { workspace = true, optional = true }
 tpt-fem-topopt = { workspace = true, optional = true }
+tpt-fem-amr = { workspace = true, optional = true }
 
 [features]
 default = ["quadrature", "element", "mesh", "sparse", "assembly", "thermal", "io-vtk", "elasticity", "solve", "eigen", "io-abaqus", "io-exodus", "mesh-gen"]
@@ -68,6 +69,9 @@ fluid = ["dep:tpt-fem-fluid"]
 coupling = ["dep:tpt-fem-coupling"]
 modal = ["dep:tpt-fem-modal"]
 topopt = ["dep:tpt-fem-topopt"]
+# Adaptive mesh refinement (quadtree h-refinement Poisson solver with
+# hanging-node elimination and ZZ error estimation).
+amr = ["dep:tpt-fem-amr"]
 # Optional MUMPS/UMFPACK sparse-direct backend (large-scale solves). Forwards
 # to `tpt-fem-sparse`'s `russell` feature; requires the SuiteSparse/MUMPS
 # toolchain (see `russell_sparse`), so it is never enabled by default.

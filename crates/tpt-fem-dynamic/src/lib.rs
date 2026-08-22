@@ -101,12 +101,8 @@ pub fn coo_add(a: &Coo, b: &Coo) -> Coo {
     out
 }
 
-/// Matrix–vector product `y = A x` for a [`Csr`] matrix.
-///
-/// The output has the same length as `x` (a square `n×n` matrix times an
-/// `n`-vector); an empty matrix contributes the zero vector, which makes this
-/// safe to call with a zero/placeholder damping or mass matrix of any dimension.
-/// Matrix–vector product `y = A x` for a [`Coo`] matrix.
+/// Matrix–vector product `y = A x` for a [`Coo`] matrix (single-shot
+/// convenience).
 ///
 /// The output has the same length as `x` (a square `n×n` matrix times an
 /// `n`-vector); an empty matrix contributes the zero vector, which makes this
@@ -117,28 +113,13 @@ pub fn coo_add(a: &Coo, b: &Coo) -> Coo {
 /// This converts `coo` to CSR on **every** call. Inside time-stepping or
 /// iterative loops, convert once with [`Coo::to_csr`] and use
 /// [`Csr::matvec`](tpt_fem_sparse::Csr::matvec) instead — that is what the
-/// integrators in this crate do internally.
+/// integrators in this crate do internally via [`CachedSystem`].
 pub fn coo_matvec(coo: &Coo, x: &[f64]) -> Vec<f64> {
     let n = x.len();
     if coo.rows.is_empty() {
         return vec![0.0; n];
     }
     coo.to_csr().matvec(x)
-}
-
-/// Matrix–vector product `y = A x` for a [`Coo`] matrix (single-shot
-/// convenience).
-///
-/// This builds the CSR representation internally, so it is correct but
-/// **not** suitable for the per-step hot loop of a time integrator — convert
-/// once with [`Coo::to_csr`] and use [`csr_matvec`] there. The output has the
-/// same length as `x`; an empty matrix contributes the zero vector.
-pub fn coo_matvec(coo: &Coo, x: &[f64]) -> Vec<f64> {
-    let n = x.len();
-    if coo.rows.is_empty() {
-        return vec![0.0; n];
-    }
-    csr_matvec(&coo.to_csr(), x)
 }
 
 /// A second-order operator `M·ü + C·v + K·u = f(t)` pre-compiled to CSR.
@@ -170,17 +151,17 @@ impl CachedSystem {
 
     /// `y = M x`.
     pub fn apply_mass(&self, x: &[f64]) -> Vec<f64> {
-        csr_matvec(&self.mass, x)
+        self.mass.matvec(x)
     }
 
     /// `y = C x`.
     pub fn apply_damping(&self, x: &[f64]) -> Vec<f64> {
-        csr_matvec(&self.damping, x)
+        self.damping.matvec(x)
     }
 
     /// `y = K x`.
     pub fn apply_stiffness(&self, x: &[f64]) -> Vec<f64> {
-        csr_matvec(&self.stiffness, x)
+        self.stiffness.matvec(x)
     }
 }
 

@@ -1055,3 +1055,142 @@ been implemented yet — tracked for a future pass.*
        `tpt-fem-dynamic::modal_frequency_response` solves the generalized
        eigenproblem via shift-invert Lanczos and evaluates the damped modal
        sum across a frequency sweep (real/imaginary amplitudes).
+
+---
+
+## Phase 14 — Platform Review Follow-ups (2026-08-23b)
+
+*A fifth platform review (bugs/TODOs/missing features/innovation/usability/
+automation), covering the repo as Phase 13's uncommitted changes stand.
+Unlike prior phases, this one found the workspace **could not build at all**
+— three independent, unrelated manifest/merge errors, all fixed in this
+pass. Everything else below is tracked for a future pass, not implemented.*
+
+### 14a — Bugs (found and fixed this pass)
+
+- [x] Root `Cargo.toml`: `crates/tpt-fem-modal` was added to
+      `[workspace] members` but never added to `[workspace.dependencies]`,
+      so `crates/tpt-fem/Cargo.toml`'s `tpt-fem-modal = { workspace = true,
+      optional = true }` failed to inherit and `cargo metadata`/`check`/
+      `build`/`test` failed workspace-wide before compiling a single crate.
+      Fixed by adding the missing `tpt-fem-modal = { version = "0.1.0", path
+      = "crates/tpt-fem-modal" }` line.
+- [x] `tpt-fem-contact/src/lib.rs`: a second, conflicting `pub struct
+      Octree`/`OctCell` definition (the pre-refactor brute-force-replacement
+      implementation) was left inline in `lib.rs` alongside the real
+      `Octree` in the `octree` module (`octree.rs`, already used correctly
+      by `contact_pairs`) — a name collision (`E0255`) plus stale
+      `contact_pairs_octree` calling the old `Octree::new(&coords, max_leaf,
+      max_depth)` signature against the module's `Octree::build(&[(usize,
+      Vec<f64>)])` API. Fixed by deleting the ~200-line duplicate
+      struct/impl and reducing `contact_pairs_octree` to delegate to
+      `contact_pairs` (which already uses the module `Octree` internally);
+      updated the two tests that exercised the deleted inline API
+      (`octree_matches_brute_force_nearest`, `octree_2d_and_edge_cases`) to
+      the module's `Octree::build`/`nearest` signature.
+- [x] `tpt-fem-dynamic/src/lib.rs`: two `pub fn coo_matvec` definitions
+      existed back-to-back (`E0428` duplicate definition) — an incomplete
+      merge of the old direct-conversion helper and the new
+      `CachedSystem`-oriented doc comment. The second copy also called a
+      nonexistent free function `csr_matvec` (three more call sites in
+      `CachedSystem::apply_mass`/`apply_damping`/`apply_stiffness`) instead
+      of the actual `Csr::matvec` method. Fixed by keeping one
+      `coo_matvec`, and switching all four `csr_matvec(&x, ..)` call sites
+      to `x.matvec(..)`.
+- [x] `tpt-fem-topopt/Cargo.toml`: `[dependencies]` was missing
+      `tpt-fem-element` and `tpt-fem-quadrature` even though `src/lib.rs`
+      imports `tpt_fem_element::{Quad4, ReferenceElement}` and
+      `tpt_fem_quadrature::gauss_legendre` directly (and the root README's
+      crate table already documented both as dependencies). Fixed by adding
+      both to the crate's `[dependencies]`.
+- [x] Verified fix: `cargo build --workspace` now succeeds (previously
+      failed on all four issues above in sequence, each masking the next
+      until fixed). `cargo test --workspace --all-features` still fails on
+      this dev box, but only for the **pre-existing, documented** reason —
+      `russell_sparse`'s build script needs a SuiteSparse/MUMPS toolchain
+      (`MSYS2_PREFIX` on Windows) that isn't installed here (see Phase 1d's
+      follow-up note); `cargo test --workspace` (default features, no
+      `russell`) is the correct check on this box and should be re-run to
+      close this phase out.
+
+### 14b — Documentation / integration drift
+
+- [x] `tpt-fem-amr` (landed via the `amr: quadtree h-refinement crate`
+      commit) is a workspace member but is the *only* Phase-12-or-later
+      crate not wired into the `tpt-fem` umbrella: no Cargo feature, no
+      re-export in `crates/tpt-fem/src/lib.rs`, absent from the root
+      `README.md` crate table and opt-in feature list (compare to
+      `topopt`/`modal`, which both got full treatment), and absent from
+      `docs/README.md`'s capability map and crate index. Right now AMR is
+      reachable only as a standalone `tpt-fem-amr::solve_adaptive`
+      dependency, unlike every sibling crate. Give it the same umbrella
+      feature + re-export + README/docs treatment `topopt` got.
+      **Closed (2026-08-23):** added the `amr` Cargo feature to the umbrella
+      (`tpt-fem-amr = { optional = true }`), root re-exports of
+      `solve_adaptive`/`build_mesh`/`zz_estimates`/`AmrOptions`/
+      `AdaptiveSolution`/`CellKey`/`QuadTree`/`HangingMesh` plus a full
+      `tpt_fem::amr` module, prelude entries, a new
+      `crates/tpt-fem-amr/README.md` (which had been declared in the crate's
+      `Cargo.toml` but never existed), and rows in the root `README.md`
+      table + opt-in feature list + `docs/README.md` capability map and
+      README index. One wrinkle worth noting: `tpt-fem-amr` exports its own
+      `solve_poisson(&HangingMesh, ...)`, so a glob re-export collides with
+      `tpt-fem-thermal::solve_poisson` (`ambiguous_glob_reexports`, hard
+      error for downstream glob importers) — hence the explicit item list at
+      the crate root with the unfiltered namespace kept under `tpt_fem::amr`.
+- [ ] No CLI or Python-binding exposure exists for any Phase 12+ crate
+      (`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`,
+      `porous`, `contact`, `fluid`, `coupling`, `modal`, `topopt`, `amr`) —
+      12 of 28 workspace crates are reachable only by writing Rust directly
+      against the library. `tpt-fem-cli` still only has
+      `solve`/`elasticity`/`modal(eigen)` + `mesh`/`init`; `tpt-fem-py`
+      still only binds `solve_poisson`/`solve_elasticity`/`solve_modal`.
+      This is the single largest adoption gap in the project today.
+      **Partially closed (2026-08-23):** `amr` now has first-class CLI
+      exposure via the new `tpt-fem amr` subcommand (see 14d below); the
+      other eleven Phase-12+ crates remain library-only.
+
+### 14c — Automation: prevent this class of bug recurring
+
+- [x] This repo already has drift-guard test precedent
+      (`cli_usage_matches_readme`, `test_readme_snippet`). Add a cheap,
+      fail-fast CI step — `cargo metadata --no-deps` (or `cargo check
+      --workspace --all-features`) as the *first* step in `ci.yml`, before
+      the slower build/test/clippy matrix — so a manifest-level break like
+      14a surfaces in seconds instead of requiring a full build to notice.
+      All three 14a manifest/merge bugs would have been caught by this
+      alone, immediately, instead of by a full workspace build.
+      **Done (2026-08-23):** new `manifest` job runs first in `ci.yml`
+      (`cargo metadata --no-deps` plus the drift test below); `fmt`,
+      `clippy`, `test`, and `docs` now `needs: [manifest]`.
+- [x] Consider a lightweight test/script asserting every
+      `crates/tpt-fem-*` directory that is a workspace member also appears
+      in root `Cargo.toml`'s `[workspace.dependencies]` table (the two
+      lists drifted apart for `tpt-fem-modal` in 14a) — would have caught
+      that specific bug mechanically, independent of a full build.
+      **Done (2026-08-23):** `crates/tpt-fem/tests/manifest_drift.rs` — three
+      tests checking members ↔ `[workspace.dependencies]` ↔ on-disk
+      `crates/tpt-fem-*` directories (`tpt-fem-py` excluded as the known
+      non-member). It immediately caught one real instance of the drift it
+      guards against: `tpt-fem-cli` was a workspace member with no
+      `[workspace.dependencies]` entry, now added to the root manifest.
+
+### 14d — Innovation / carried-forward ideas
+
+- [ ] Carry forward the two items still open at the end of Phase 13: WASM
+      in-browser interactive solve+visualize demo, and GPU-accelerated
+      element assembly/sparse matvec (CPU-side matvec/CSR hoisting already
+      landed per 13d; GPU offload itself remains undone).
+- [x] Given 14b's CLI/Python gap, the highest-leverage "innovative"
+      addition is exposing `tpt-fem-amr::solve_adaptive` through the CLI
+      (e.g. `tpt-fem solve --amr`) once 14b's umbrella wiring lands — a
+      visible, easy-to-demo "adaptive accuracy for less compute" showcase
+      feature that doubles as the umbrella integration's first real
+      consumer. **Done (2026-08-23):** new `tpt-fem amr` subcommand in
+      `crates/tpt-fem-cli/src/main.rs` — runs `solve_adaptive` on `[0,1]²`
+      with flags `--max-elements` (default 512), `--theta` (default 0.7,
+      validated to `(0,1]`), `--constant` (uniform source), and `-o/--output`
+      (default `amr.vtk`); converts the quadtree leaf mesh into the workspace
+      `Mesh` model, exports solution + mesh as ParaView `.vtk`, and prints an
+      elements/nodes/error/time report. Covered by
+      `amr_runs_and_writes_vtk` and `amr_rejects_invalid_theta`.

@@ -28,10 +28,14 @@
 //! | `contact`    | `tpt_fem_contact::*`           | `tpt-fem-contact`     |
 //! | `fluid`      | `tpt_fem_fluid::*`             | `tpt-fem-fluid`       |
 //! | `coupling`   | `tpt_fem_coupling::*`          | `tpt-fem-coupling`    |
+//! | `modal`      | `tpt_fem_modal::*`             | `tpt-fem-modal`       |
+//! | `topopt`     | `tpt_fem_topopt::*`            | `tpt-fem-topopt`      |
+//! | `amr`        | `tpt_fem_amr::*`               | `tpt-fem-amr`         |
 //!
 //! All Phase 1–4 features are enabled by default. The Phase 12 crates
 //! (`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`, `porous`,
-//! `contact`, `fluid`, `coupling`) are experimental and **off by default** —
+//! `contact`, `fluid`, `coupling`) plus the later additions (`modal`, `topopt`,
+//! `amr`) are experimental and **off by default** —
 //! enable them explicitly with `--features`.
 //!
 //! The end-to-end pipeline — reference-element shape functions and gradients,
@@ -140,6 +144,22 @@ pub enum Error {
     Newton(#[from] tpt_fem_solve::NewtonError),
 }
 
+// NOTE: `tpt-fem-amr` also exports its own internal `solve_poisson` (over a
+// `HangingMesh`) whose signature clashes with `tpt-fem-thermal`'s, so the AMR
+// re-export is an explicit item list instead of a glob. The AMR Poisson solver
+// remains reachable as `tpt_fem_amr::solve_poisson` via the `amr` module below.
+#[cfg(feature = "amr")]
+pub use tpt_fem_amr::{
+    build_mesh, solve_adaptive, zz_estimates, AdaptiveSolution, AmrOptions, CellKey, HangingMesh,
+    QuadTree,
+};
+/// Full, unfiltered namespace of the `tpt-fem-amr` crate (feature `amr`),
+/// including `tpt_fem_amr::solve_poisson` which is excluded from the
+/// crate-root re-exports to avoid clashing with `tpt-fem-thermal`.
+#[cfg(feature = "amr")]
+pub mod amr {
+    pub use tpt_fem_amr::*;
+}
 #[cfg(feature = "assembly")]
 pub use tpt_fem_assembly::*;
 #[cfg(feature = "composite")]
@@ -196,6 +216,11 @@ pub use tpt_fem_topopt::*;
 /// written against a single import. Like the crate-root re-exports, each
 /// constituent is gated: only crates whose feature is on appear in the prelude.
 pub mod prelude {
+    #[cfg(feature = "amr")]
+    pub use tpt_fem_amr::{
+        build_mesh, solve_adaptive, zz_estimates, AdaptiveSolution, AmrOptions, CellKey,
+        HangingMesh, QuadTree,
+    };
     #[cfg(feature = "assembly")]
     pub use tpt_fem_assembly::*;
     #[cfg(feature = "composite")]

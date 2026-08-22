@@ -17,7 +17,7 @@ name = "tpt-fem"
 path = "src/main.rs"
 
 [dependencies]
-tpt-fem = { workspace = true }
+tpt-fem = { workspace = true, features = ["amr"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }

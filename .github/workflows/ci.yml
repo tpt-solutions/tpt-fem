@@ -16,6 +16,21 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Fail-fast manifest sanity check. Runs `cargo metadata` (which fully parses
+  # every workspace manifest in seconds) plus the workspace-membership drift
+  # test BEFORE the slower build/test/clippy matrix, so a manifest-level break
+  # (missing member, missing [workspace.dependencies] entry, dangling optional
+  # dependency) surfaces immediately instead of after a full compile.
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo metadata parses cleanly
+        run: cargo metadata --no-deps --format-version 1 > /dev/null
+      - name: workspace membership / dependency drift test
+        run: cargo test -p tpt-fem --test manifest_drift
+
   fmt:
     runs-on: ubuntu-latest
     steps:
@@ -42,6 +57,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
+    needs: [manifest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +68,7 @@ jobs:
       - run: cargo test --workspace --all-features
 
   docs:
+    needs: [manifest]
     runs-on: ubuntu-latest
     env:
       RUSTDOCFLAGS: -D warnings

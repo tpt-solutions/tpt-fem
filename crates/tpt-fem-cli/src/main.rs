@@ -2,6 +2,10 @@
 //!
 //! Subcommands:
 //! * `solve` — run a steady Poisson/heat-conduction problem from a TOML config.
+//! * `elasticity` / `modal` — elasticity and modal problems from a TOML config.
+//! * `amr` — adaptive h-refinement Poisson solve on the unit square
+//!   (`tpt-fem-amr::solve_adaptive`): quadtree refinement driven by a
+//!   Zienkiewicz–Zhu error estimator with Dörfler marking.
 //! * `mesh info` — print summary statistics about a mesh file.
 //! * `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
 //!
@@ -14,9 +18,9 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use tpt_fem::{
-    boundary_faces, box_mesh, read_exodus, read_inp, read_vtk, solve_elasticity, solve_modal,
-    solve_poisson, write_vtk, write_vtk_with_data, CellType, ElasticModel, Error, Mesh,
-    MeshBuilder, PointData,
+    boundary_faces, box_mesh, read_exodus, read_inp, read_vtk, solve_adaptive, solve_elasticity,
+    solve_modal, solve_poisson, write_vtk, write_vtk_with_data, AmrOptions, CellType, ElasticModel,
+    Error, Mesh, MeshBuilder, PointData,
 };
 
 type Err = Error;
@@ -48,6 +52,22 @@ enum Command {
     Modal {
         /// Path to the TOML problem description.
         config: PathBuf,
+    },
+    /// Adaptive h-refinement Poisson solve on `[0,1]²`: refine where the
+    /// ZZ error estimator says it matters until the element budget is spent.
+    Amr {
+        /// Element budget for the adaptive loop.
+        #[arg(long, default_value_t = 512)]
+        max_elements: usize,
+        /// Dörfler bulk-marking fraction in `(0, 1]`.
+        #[arg(long, default_value_t = 0.7)]
+        theta: f64,
+        /// Constant volumetric source `f(x) = constant`.
+        #[arg(long, default_value_t = 1.0)]
+        constant: f64,
+        /// Path of the exported ParaView `.vtk` result.
+        #[arg(short, long, default_value = "amr.vtk")]
+        output: PathBuf,
     },
     /// Generate a starter `problem.toml` for a chosen problem type.
     Init {
@@ -259,6 +279,12 @@ fn run() -> Result<(), Err> {
         Command::Solve { config } => solve_config(&config, None),
         Command::Elasticity { config } => solve_config(&config, Some("elasticity")),
         Command::Modal { config } => solve_config(&config, Some("modal")),
+        Command::Amr {
+            max_elements,
+            theta,
+            constant,
+            output,
+        } => run_amr(max_elements, theta, constant, &output),
         Command::Init { problem, output } => init_config(&problem, &output),
         Command::Mesh { action } => match action {
             MeshAction::Info { file } => mesh_info(&file),
@@ -622,6 +648,56 @@ fn solve_config(path: &PathBuf, expected: Option<&str>) -> Result<(), Err> {
     Ok(())
 }
 
+/// Adaptive h-refinement Poisson driver (`amr` subcommand).
+///
+/// Runs [`tpt_fem::solve_adaptive`] on `[0,1]²` with a constant source and
+/// homogeneous Dirichlet boundary data, then exports the final quadtree leaf
+/// mesh and solution as a ParaView `.vtk` file.
+fn run_amr(max_elements: usize, theta: f64, constant: f64, output: &PathBuf) -> Result<(), Err> {
+    if theta <= 0.0 || theta > 1.0 {
+        return Err(Error::Msg(format!(
+            "--theta must be in (0, 1], got {theta}"
+        )));
+    }
+    let f = move |_: f64, _: f64| constant;
+    let g = |_: f64, _: f64| 0.0;
+    let t0 = Instant::now();
+    let res = solve_adaptive(
+        &f,
+        &g,
+        &AmrOptions {
+            max_elements,
+            theta,
+        },
+    )?;
+    let elapsed = t0.elapsed();
+
+    // Convert the quadtree leaf mesh into the workspace `Mesh` model so the
+    // standard VTK export path can be reused.
+    let mut b = MeshBuilder::new();
+    for c in &res.mesh.coords {
+        b.add_node(vec![c[0], c[1]]);
+    }
+    for e in &res.mesh.elems {
+        b.add_element(CellType::Quad, e.to_vec());
+    }
+    let mesh = b.build();
+
+    let umin = res.u.iter().cloned().fold(f64::INFINITY, f64::min);
+    let umax = res.u.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    // Brief report summary so results can be sanity-checked without opening
+    // ParaView (element count, estimated error, wall-clock time).
+    println!("Elements:            {}", res.mesh.len());
+    println!("Nodes:               {}", res.mesh.coords.len());
+    println!("DOFs:                {}", res.mesh.coords.len());
+    println!("Solve time:          {:.3?}", elapsed);
+    println!("Estimated error:     {:.6e}", res.estimated_error);
+    println!("Solution u in [{:.6e}, {:.6e}]", umin, umax);
+    write_vtk_with_data(&mesh, &[PointData::new("u", res.u)], output)?;
+    println!("Wrote {}", output.display());
+    Ok(())
+}
+
 /// Reference (spatial) dimension of a cell type.
 fn cell_dim(cell: CellType) -> usize {
     match cell {
@@ -968,6 +1044,24 @@ $EndElements
         assert!(meta.len() > 0, "VTK output should be non-empty");
         let _ = std::fs::remove_file(&out);
         let _ = std::fs::remove_file(&cfg_path);
+    }
+
+    #[test]
+    fn amr_runs_and_writes_vtk() {
+        // Small element budget so the adaptive loop finishes quickly: must
+        // produce a non-empty VTK with the refined quadtree mesh + solution.
+        let out = std::env::temp_dir().join("tpt_fem_cli_amr_test.vtk");
+        run_amr(64, 0.7, 1.0, &out).expect("amr run");
+        let meta = std::fs::metadata(&out).expect("output written");
+        assert!(meta.len() > 0, "VTK output should be non-empty");
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn amr_rejects_invalid_theta() {
+        let out = std::env::temp_dir().join("tpt_fem_cli_amr_bad_theta.vtk");
+        assert!(run_amr(64, 0.0, 1.0, &out).is_err());
+        assert!(run_amr(64, 1.5, 1.0, &out).is_err());
     }
 
     #[test]

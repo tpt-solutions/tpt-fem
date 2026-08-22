@@ -134,215 +134,10 @@ pub fn contact_pairs(
         .collect()
 }
 
-/// Uniform octree over a fixed point set, for fast nearest-neighbour queries.
-///
-/// The root cell is the smallest axis-aligned cube enclosing all points;
-/// cells are subdivided into 8 children until they hold at most `max_leaf`
-/// points or reach `max_depth`. A nearest-neighbour query descends cells in
-/// order of their minimum possible distance to the query point, pruning any
-/// subtree whose bounding cube cannot beat the current best — O(log n) per
-/// query on evenly distributed points versus O(n) for [`contact_pairs`].
-#[derive(Debug)]
-pub struct Octree {
-    /// Point coordinates, normalised internally to 3-D (2-D points are
-    /// zero-padded).
-    pts: Vec<[f64; 3]>,
-    /// Flattened cell storage; `children` indices refer back into this vec.
-    cells: Vec<OctCell>,
-}
-
-#[derive(Debug)]
-struct OctCell {
-    center: [f64; 3],
-    half: f64,
-    /// `Some([child; 8])` for interior cells (child order: bit 0 = −x/+x,
-    /// bit 1 = −y/+y, bit 2 = −z/+z), `None` for leaves holding `points`.
-    children: Option<[usize; 8]>,
-    points: Vec<usize>,
-}
-
-impl Octree {
-    fn min_dist2(cell: &OctCell, q: &[f64; 3]) -> f64 {
-        let mut d2 = 0.0;
-        for a in 0..3 {
-            let delta = (q[a] - cell.center[a]).abs() - cell.half;
-            if delta > 0.0 {
-                d2 += delta * delta;
-            }
-        }
-        d2
-    }
-
-    /// Build an octree over `points` (any dimensionality ≤ 3).
-    pub fn new(points: &[Vec<f64>], max_leaf: usize, max_depth: u32) -> Octree {
-        let pts: Vec<[f64; 3]> = points
-            .iter()
-            .map(|p| {
-                [
-                    p.first().copied().unwrap_or(0.0),
-                    p.get(1).copied().unwrap_or(0.0),
-                    p.get(2).copied().unwrap_or(0.0),
-                ]
-            })
-            .collect();
-        let mut lo = [f64::INFINITY; 3];
-        let mut hi = [-f64::INFINITY; 3];
-        for p in &pts {
-            for a in 0..3 {
-                lo[a] = lo[a].min(p[a]);
-                hi[a] = hi[a].max(p[a]);
-            }
-        }
-        if pts.is_empty() {
-            return Octree {
-                pts,
-                cells: Vec::new(),
-            };
-        }
-        let center = [
-            (lo[0] + hi[0]) / 2.0,
-            (lo[1] + hi[1]) / 2.0,
-            (lo[2] + hi[2]) / 2.0,
-        ];
-        let half = hi
-            .iter()
-            .zip(&lo)
-            .map(|(h, l)| (h - l) / 2.0)
-            .fold(0.0_f64, f64::max)
-            .max(1e-12);
-        let mut tree = Octree {
-            pts,
-            cells: Vec::new(),
-        };
-        let all: Vec<usize> = (0..tree.pts.len()).collect();
-        tree.subdivide(center, half, all, 0, max_leaf.max(1), max_depth);
-        tree
-    }
-
-    fn subdivide(
-        &mut self,
-        center: [f64; 3],
-        half: f64,
-        points: Vec<usize>,
-        depth: u32,
-        max_leaf: usize,
-        max_depth: u32,
-    ) -> usize {
-        if points.len() <= max_leaf || depth >= max_depth {
-            self.cells.push(OctCell {
-                center,
-                half,
-                children: None,
-                points,
-            });
-            return self.cells.len() - 1;
-        }
-        let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); 8];
-        for &pi in &points {
-            let p = self.pts[pi];
-            let mut code = 0usize;
-            for a in 0..3 {
-                if p[a] >= center[a] {
-                    code |= 1 << a;
-                }
-            }
-            buckets[code].push(pi);
-        }
-        // Reserve this slot first so children can reference siblings.
-        self.cells.push(OctCell {
-            center,
-            half,
-            children: None,
-            points: Vec::new(),
-        });
-        let my_idx = self.cells.len() - 1;
-        let child_half = half / 2.0;
-        let mut children = [my_idx; 8];
-        for (oct, bucket) in buckets.into_iter().enumerate() {
-            if bucket.is_empty() {
-                continue;
-            }
-            let mut cc = center;
-            for a in 0..3 {
-                cc[a] += if oct & (1 << a) != 0 {
-                    child_half
-                } else {
-                    -child_half
-                };
-            }
-            let ci = self.subdivide(cc, child_half, bucket, depth + 1, max_leaf, max_depth);
-            children[oct] = ci;
-        }
-        self.cells[my_idx].children = Some(children);
-        my_idx
-    }
-
-    /// Index of the nearest point to `q`, with its squared distance
-    /// (`None` only for an empty tree).
-    pub fn nearest(&self, q: &[f64]) -> Option<(usize, f64)> {
-        if self.cells.is_empty() {
-            return None;
-        }
-        let qq = [
-            q.first().copied().unwrap_or(0.0),
-            q.get(1).copied().unwrap_or(0.0),
-            q.get(2).copied().unwrap_or(0.0),
-        ];
-        let mut best: Option<(usize, f64)> = None;
-        // DFS with bound pruning: every cell whose cube cannot hold a point
-        // closer than the current best is skipped.
-        let mut stack = vec![0usize];
-        while let Some(ci) = stack.pop() {
-            let cell = &self.cells[ci];
-            if let Some((_, bd)) = best {
-                if Self::min_dist2(cell, &qq) > bd {
-                    continue;
-                }
-            }
-            match &cell.children {
-                None => {
-                    for &pi in &cell.points {
-                        let d2: f64 = (0..3)
-                            .map(|a| {
-                                let e = qq[a] - self.pts[pi][a];
-                                e * e
-                            })
-                            .sum();
-                        if best.map_or(true, |(_, bd)| d2 < bd) {
-                            best = Some((pi, d2));
-                        }
-                    }
-                }
-                Some(children) => {
-                    // Visit nearer children first.
-                    let mut order: Vec<usize> =
-                        children.iter().copied().filter(|&c| c != ci).collect();
-                    order.sort_by(|&x, &y| {
-                        let dx = Self::min_dist2(&self.cells[x], &qq);
-                        let dy = Self::min_dist2(&self.cells[y], &qq);
-                        dx.partial_cmp(&dy).unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    stack.extend(order);
-                }
-            }
-        }
-        best
-    }
-
-    /// Number of points indexed.
-    pub fn len(&self) -> usize {
-        self.pts.len()
-    }
-
-    /// Whether the tree indexes no points.
-    pub fn is_empty(&self) -> bool {
-        self.pts.is_empty()
-    }
-}
-
 /// Octree-accelerated nearest-node pairing between two surfaces — same
-/// contract as [`contact_pairs`], but builds an [`Octree`] over surface `b`
-/// once and answers each query in O(log |b|) instead of O(|b|).
+/// contract as [`contact_pairs`] (which already uses [`Octree`] internally).
+/// Kept as a distinct name for API stability; delegates directly to
+/// [`contact_pairs`].
 ///
 /// Results are identical to [`contact_pairs`] up to tie-breaking between
 /// exactly equidistant candidates.
@@ -350,11 +145,7 @@ pub fn contact_pairs_octree(
     a: &[(usize, Vec<f64>)],
     b: &[(usize, Vec<f64>)],
 ) -> Vec<(usize, Option<(usize, f64)>)> {
-    let coords: Vec<Vec<f64>> = b.iter().map(|(_, c)| c.clone()).collect();
-    let tree = Octree::new(&coords, 8, 24);
-    a.iter()
-        .map(|(na, ca)| (*na, tree.nearest(ca).map(|(i, d2)| (i, d2.sqrt()))))
-        .collect()
+    contact_pairs(a, b)
 }
 
 #[cfg(test)]
@@ -461,20 +252,14 @@ mod tests {
         // nearest neighbour (and distance) as the brute-force scan.
         let pts = lcg_points(400, 3);
         let queries = lcg_points(60, 3);
-        let tree = Octree::new(&pts, 8, 24);
-        assert_eq!(tree.len(), 400);
+        let indexed: Vec<(usize, Vec<f64>)> =
+            pts.iter().enumerate().map(|(i, c)| (i, c.clone())).collect();
+        let tree = Octree::build(&indexed);
         for q in &queries {
-            let brute = contact_pairs(
-                &[(0usize, q.clone())],
-                &(0..pts.len())
-                    .map(|i| (i, pts[i].clone()))
-                    .collect::<Vec<_>>(),
-            )[0]
-            .1
-            .unwrap();
+            let brute = contact_pairs(&[(0usize, q.clone())], &indexed)[0].1.unwrap();
             let fast = tree.nearest(q).unwrap();
             assert_eq!(fast.0, brute.0, "different node for {q:?}");
-            assert!((fast.1.sqrt() - brute.1).abs() < 1e-12);
+            assert!((fast.1 - brute.1).abs() < 1e-12);
         }
     }
 
@@ -482,13 +267,16 @@ mod tests {
     fn octree_2d_and_edge_cases() {
         // 2-D points (zero-padded internally) and duplicate points must work;
         // an empty tree reports no neighbour.
-        let pts = vec![vec![0.0, 0.0], vec![2.0, 2.0], vec![2.0, 2.0]];
-        let tree = Octree::new(&pts, 1, 16);
-        let (i, d2) = tree.nearest(&[1.9, 1.9]).unwrap();
-        assert!(i >= 1 && d2.sqrt() < 0.15, "got ({i}, {})", d2.sqrt());
+        let pts: Vec<(usize, Vec<f64>)> = vec![
+            (0, vec![0.0, 0.0]),
+            (1, vec![2.0, 2.0]),
+            (2, vec![2.0, 2.0]),
+        ];
+        let tree = Octree::build(&pts);
+        let (i, d) = tree.nearest(&[1.9, 1.9]).unwrap();
+        assert!(i >= 1 && d < 0.15, "got ({i}, {d})");
         assert!(tree.nearest(&[10.0, 10.0]).unwrap().0 >= 1);
-        let empty = Octree::new(&[], 4, 8);
-        assert!(empty.is_empty());
+        let empty = Octree::build(&[]);
         assert!(empty.nearest(&[0.0, 0.0]).is_none());
     }
 

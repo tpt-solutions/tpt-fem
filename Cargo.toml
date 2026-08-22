@@ -27,6 +27,7 @@ members = [
     "crates/tpt-fem-coupling",
     "crates/tpt-fem-topopt",
     "crates/tpt-fem-amr",
+    "crates/tpt-fem-modal",
 ]
 exclude = ["fuzz", "crates/tpt-fem-py"]
 
@@ -54,6 +55,7 @@ tpt-fem-io-abaqus = { version = "0.1.0", path = "crates/tpt-fem-io-abaqus" }
 tpt-fem-io-exodus = { version = "0.1.0", path = "crates/tpt-fem-io-exodus" }
 tpt-fem-mesh-gen = { version = "0.1.0", path = "crates/tpt-fem-mesh-gen" }
 tpt-fem = { version = "0.1.0", path = "crates/tpt-fem" }
+tpt-fem-cli = { version = "0.1.0", path = "crates/tpt-fem-cli" }
 tpt-fem-dofmap = { version = "0.1.0", path = "crates/tpt-fem-dofmap" }
 tpt-fem-dynamic = { version = "0.1.0", path = "crates/tpt-fem-dynamic" }
 tpt-fem-plasticity = { version = "0.1.0", path = "crates/tpt-fem-plasticity" }
@@ -65,6 +67,7 @@ tpt-fem-fluid = { version = "0.1.0", path = "crates/tpt-fem-fluid" }
 tpt-fem-coupling = { version = "0.1.0", path = "crates/tpt-fem-coupling" }
 tpt-fem-topopt = { version = "0.1.0", path = "crates/tpt-fem-topopt" }
 tpt-fem-amr = { version = "0.1.0", path = "crates/tpt-fem-amr" }
+tpt-fem-modal = { version = "0.1.0", path = "crates/tpt-fem-modal" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"

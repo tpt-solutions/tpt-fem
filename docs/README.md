@@ -36,6 +36,7 @@ The workspace is a layered finite-element-method core; each crate has its own
 | Multi-physics coupling driver | `tpt-fem-coupling` | all examples |
 | Modal analysis & frequency-response | `tpt-fem-modal` | `modal_analysis` |
 | SIMP topology optimization (2-D) | `tpt-fem-topopt` | all examples |
+| Adaptive h-refinement (quadtree AMR) | `tpt-fem-amr` | — |
 | Umbrella re-exports + prelude | `tpt-fem` | all examples |
 | Command-line driver | `tpt-fem-cli` | — |
 | Python bindings (maturin/pyo3) | `tpt-fem-py` | `walkthrough.py` |
@@ -66,6 +67,7 @@ The workspace is a layered finite-element-method core; each crate has its own
 - [tpt-fem-coupling](../crates/tpt-fem-coupling/README.md)
 - [tpt-fem-modal](../crates/tpt-fem-modal/README.md)
 - [tpt-fem-topopt](../crates/tpt-fem-topopt/README.md)
+- [tpt-fem-amr](../crates/tpt-fem-amr/README.md)
 - [tpt-fem (umbrella)](../crates/tpt-fem/README.md)
 - [tpt-fem-cli](../crates/tpt-fem-cli/README.md)
 - [tpt-fem-py](../crates/tpt-fem-py/README.md)

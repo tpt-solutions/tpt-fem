@@ -37,8 +37,9 @@ crates are consumed as path dependencies within the workspace.
 | [`tpt-fem-coupling`](crates/tpt-fem-coupling) | Multiphysics: thermal-structural, electro-thermal, fluid-structure. | `tpt-fem-{thermal,elasticity,fluid,dofmap,dynamic}` |
 | [`tpt-fem-modal`](crates/tpt-fem-modal) | Modal analysis + frequency-response / modal superposition. | `tpt-fem-{eigen,sparse,dynamic}` |
 | [`tpt-fem-topopt`](crates/tpt-fem-topopt) | SIMP topology optimization for 2-D linear elasticity. | `tpt-fem-{sparse,assembly,element,quadrature}` |
+| [`tpt-fem-amr`](crates/tpt-fem-amr) | Adaptive h-refinement: 1-irregular quadtree Poisson with hanging-node elimination and ZZ error estimation. | `tpt-fem-sparse` |
 | [`tpt-fem`](crates/tpt-fem) | Umbrella crate re-exporting all of the above behind Cargo features, plus `prelude` and end-to-end tests. | all of the above |
-| [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `mesh info`, `mesh convert`. | `tpt-fem` |
+| [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `elasticity`, `modal`, `amr`, `mesh info`, `mesh convert`. | `tpt-fem` |
 
 Every crate is tracked as `git` in the sibling
 [`tpt-rust-map/registry.toml`](https://github.com/tpt-solutions/tpt-rust-map).
@@ -50,7 +51,7 @@ The `tpt-fem` umbrella re-exports each constituent behind a Cargo feature
 `elasticity`, `solve`, `eigen`, `io-abaqus`, `io-exodus`, `mesh-gen`). **All are
 enabled by default.** The advanced Phase 12+ crates
 (`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`, `porous`,
-`contact`, `fluid`, `coupling`, `modal`, `topopt`) are opt-in features, not
+`contact`, `fluid`, `coupling`, `modal`, `topopt`, `amr`) are opt-in features, not
 enabled by default. `use tpt_fem::prelude::*;` pulls in the public API of every
 enabled crate.
 
@@ -127,6 +128,13 @@ cargo run -p tpt-fem-cli -- init poisson problem.toml
 
 # Solve a Poisson problem from a TOML config (see crates/tpt-fem-cli for schema).
 cargo run -p tpt-fem-cli -- solve problem.toml
+
+# Solve an elasticity / modal problem from a TOML config.
+cargo run -p tpt-fem-cli -- elasticity problem.toml
+cargo run -p tpt-fem-cli -- modal problem.toml
+
+# Adaptive h-refinement Poisson solve on [0,1]^2 (quadtree + ZZ estimator).
+cargo run -p tpt-fem-cli -- amr --max-elements 512 --output amr.vtk
 
 # Inspect a mesh (.msh / .vtk / .inp / .ex).
 cargo run -p tpt-fem-cli -- mesh info mesh.msh
