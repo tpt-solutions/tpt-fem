@@ -106,8 +106,7 @@ fn main() {
     println!("stage 1: steady conduction on {nx} x {ny} Quad4 strip");
     println!(
         "  T in [{:.4}, {:.4}] K, max |T - linear| = {max_err:.3e} K",
-        0.0,
-        t_hot
+        0.0, t_hot
     );
     assert!(max_err < 1e-8, "linear temperature field must be exact");
 
@@ -182,4 +181,3 @@ fn main() {
     println!("\nwrote {}", path.display());
     println!("OK: conduction -> expansion pipeline verified and exported.");
 }
-

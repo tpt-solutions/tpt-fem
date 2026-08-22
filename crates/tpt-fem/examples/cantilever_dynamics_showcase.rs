@@ -15,16 +15,16 @@
 //!    diagonals, which keeps the eigenproblem symmetric.
 //!
 //! 2. **Modal analysis** — `modal_analysis` extracts the lowest modes via a
-//!   generalized Lanczos solve. The first bending frequency is compared with
-//!   Euler-Bernoulli beam theory,
-//!   `omega_1 = (1.875)^2 / L^2 * sqrt(E*I / (rho*A))`; a coarse Quad4 mesh is
-//!   slightly stiff in bending (shear locking of bilinear quads), so FEM sits
-//!   a few percent above theory.
+//!    generalized Lanczos solve. The first bending frequency is compared with
+//!    Euler-Bernoulli beam theory,
+//!    `omega_1 = (1.875)^2 / L^2 * sqrt(E*I / (rho*A))`; a coarse Quad4 mesh is
+//!    slightly stiff in bending (shear locking of bilinear quads), so FEM sits
+//!    a few percent above theory.
 //!
 //! 3. **Transient response** — a step load at the tip is integrated two ways:
-//!   full-system implicit Newmark and truncated modal superposition. With
-//!   enough modes retained the two histories must agree closely, which
-//!   validates both paths against each other on the same FE model.
+//!    full-system implicit Newmark and truncated modal superposition. With
+//!    enough modes retained the two histories must agree closely, which
+//!    validates both paths against each other on the same FE model.
 
 use tpt_fem_assembly::assemble;
 use tpt_fem_dynamic::{newmark, NewmarkOptions};
@@ -131,21 +131,30 @@ fn main() {
         .collect();
     let (k, map) = reduce(&k_full, &fixed, ndof);
     let (m, _) = reduce(&m_full, &fixed, ndof);
-    let n_red = k.rows.iter().cloned().chain(std::iter::once(0)).max().unwrap() + 1;
+    let n_red = k
+        .rows
+        .iter()
+        .cloned()
+        .chain(std::iter::once(0))
+        .max()
+        .unwrap()
+        + 1;
 
     // ---- Modal analysis vs beam theory ---------------------------------
     let num_modes = 8;
-    let data = modal_analysis(&k, &m, 0.0, num_modes, 2 * num_modes, 0.0)
-        .expect("modal analysis");
+    let data = modal_analysis(&k, &m, 0.0, num_modes, 2 * num_modes, 0.0).expect("modal analysis");
     println!(
         "cantilever L = {l}, h = {h}, {nx} x {ny} Quad4, {} DOFs",
         ndof - fixed.len()
     );
     for (i, w) in data.omega.iter().enumerate() {
-        println!("  f{:2} = {:10.3} Hz", i + 1, w / (2.0 * std::f64::consts::PI));
+        println!(
+            "  f{:2} = {:10.3} Hz",
+            i + 1,
+            w / (2.0 * std::f64::consts::PI)
+        );
     }
-    let beam_omega1 =
-        1.875_f64.powi(2) / l / l * (e * h * h / (12.0 * rho)).sqrt();
+    let beam_omega1 = 1.875_f64.powi(2) / l / l * (e * h * h / (12.0 * rho)).sqrt();
     let ratio = data.omega[0] / beam_omega1;
     println!(
         "\n  omega_1 FEM  = {:.4e} rad/s\n  omega_1 beam = {:.4e} rad/s\n  ratio        = {:.4}",
@@ -187,11 +196,23 @@ fn main() {
         cols: vec![],
         vals: vec![],
     };
-    let hist_full = newmark(&m, &no_damping, &k, &zero, &zero, load.clone(), &opts, nsteps);
+    let hist_full = newmark(
+        &m,
+        &no_damping,
+        &k,
+        &zero,
+        &zero,
+        load.clone(),
+        &opts,
+        nsteps,
+    );
     let hist_modal = data.modal_superposition(&zero, &zero, &load, &opts, nsteps);
 
     println!("\ntip displacement history (step load {f0:.0} N):");
-    println!("  {:>8}  {:>13}  {:>13}  {:>8}", "t [ms]", "Newmark", "modal", "diff");
+    println!(
+        "  {:>8}  {:>13}  {:>13}  {:>8}",
+        "t [ms]", "Newmark", "modal", "diff"
+    );
     let mut max_rel = 0.0_f64;
     for step in [50usize, 150, 250, 350, 500] {
         let ((_, uf), (_, um)) = (&hist_full[step], &hist_modal[step]);
@@ -214,4 +235,3 @@ fn main() {
         100.0 * (ratio - 1.0)
     );
 }
-

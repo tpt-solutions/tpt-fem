@@ -47,7 +47,6 @@ fn clamp_first_dof(coo: &Coo) -> Coo {
     out
 }
 
-
 fn main() {
     let l = 1.0; // bar length, m
     let n_el = 20; // Line elements
@@ -98,8 +97,7 @@ fn main() {
 
     // Hard-contact solve via the library's augmented-Lagrangian iteration.
     let tol = 1e-10;
-    let (u_al, lambda) =
-        augmented_lagrangian(&k, &compressive, &cons, penalty, 200, tol);
+    let (u_al, lambda) = augmented_lagrangian(&k, &compressive, &cons, penalty, 200, tol);
     let al_max = u_al[1..].iter().cloned().fold(0.0_f64, f64::min);
     let pen_max = u_pen[1..].iter().cloned().fold(0.0_f64, f64::min);
     let sum_lambda: f64 = lambda.iter().sum();
@@ -110,7 +108,10 @@ fn main() {
         "  sum of multipliers       = {sum_lambda:.6e} N  (total load {:.6e} N)",
         -total
     );
-    assert!(pen_max < 0.0, "compression must penetrate under pure penalty");
+    assert!(
+        pen_max < 0.0,
+        "compression must penetrate under pure penalty"
+    );
     assert!(
         al_max.abs() < pen_max.abs() / 10.0,
         "AL penetration must be much smaller than penalty penetration"
@@ -152,4 +153,3 @@ fn main() {
     );
     println!("\nOK: one-sided contact engages under compression, stays silent in tension.");
 }
-
