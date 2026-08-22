@@ -17,6 +17,7 @@ tpt-fem-sparse = { workspace = true }
 tpt-fem-assembly = { workspace = true }
 tpt-fem-mesh = { workspace = true }
 tpt-fem-elasticity = { workspace = true }
+tpt-fem-eigen = { workspace = true }
 
 [features]
 default = []

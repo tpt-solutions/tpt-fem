@@ -5,6 +5,19 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `modal_frequency_response` — harmonic frequency-response analysis by modal
+  superposition: solves the `K x = ω² M x` eigenproblem with
+  `tpt-fem-eigen`'s generalized shift-invert Lanczos and evaluates the
+  damped modal sum over a frequency sweep, returning real/imaginary
+  displacement amplitudes (`ModalFrequencyResponse`). The frequency-domain
+  counterpart of stepping `newmark` to steady state.
+- `DynamicError::Sparse` / `DynamicError::InvalidInput` variants for the new
+  workflow's failure modes.
+
 ## [0.1.0] - 2026-08-20
 
 ### Added
