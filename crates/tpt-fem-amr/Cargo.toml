@@ -1,0 +1,22 @@
+[package]
+name = "tpt-fem-amr"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Adaptive h-refinement for tpt-fem: 1-irregular quadtree Poisson solver with hanging-node constraints and ZZ error estimation."
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["finite-element", "fem", "adaptive", "amr", "poisson"]
+categories = ["science", "mathematics", "simulation"]
+
+[dependencies]
+tpt-fem-sparse = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true
