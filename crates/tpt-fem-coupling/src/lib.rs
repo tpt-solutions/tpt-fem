@@ -168,7 +168,237 @@ pub fn electro_thermal(
     tpt_fem_thermal::solve_poisson(mesh, conductivity, 2, |_| q, dirichlet, None, None)
 }
 
-/// A basic partitioned fluid–structure interaction step.
+/// Work-consistent fluid–structure interface load vector.
+///
+/// Given the `(structure node, fluid node)` interface pairing and the fluid
+/// pressure at every fluid node, assemble the structure's Neumann load vector
+/// by integrating the traction `p·n̂` over the interface *faces* with the
+/// face shape functions — the work-equivalent (consistent) load, rather than
+/// a lumped per-node point force.
+///
+/// The interface faces are discovered as the boundary faces of the structure
+/// mesh whose nodes all lie on the interface (an edge in 2-D / a triangle or
+/// quad face in 3-D that belongs to exactly one element). Each face's normal
+/// is oriented *outward*, away from its owning element's centroid, so the
+/// direction adapts to horizontal, vertical, and curved interfaces alike.
+/// Isolated interface nodes that belong to no interface face (single-node
+/// coupling) fall back to a lumped load `p·n̂` with the same geometry-aware
+/// outward normal.
+pub fn fsi_interface_loads(
+    struct_mesh: &Mesh,
+    interface: &[(usize, usize)],
+    fluid_pressure: &[f64],
+) -> Vec<f64> {
+    let dim = match struct_mesh.elements[0].cell_type {
+        CellType::Tri | CellType::Quad => 2,
+        CellType::Tet | CellType::Hex => 3,
+        other => panic!("fsi_interface_loads: unsupported cell {other:?}"),
+    };
+    let mut s_to_f: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::new();
+    for &(s, f) in interface {
+        s_to_f.insert(s, f);
+    }
+    let press = |s_node: usize| -> f64 {
+        let f = s_to_f.get(&s_node).copied().unwrap_or_else(|| {
+            panic!("fsi_interface_loads: structure node {s_node} not on the interface")
+        });
+        fluid_pressure[f]
+    };
+    let coords = |n: usize| -> Vec<f64> { struct_mesh.node_coords(n).to_vec() };
+    let mut loads = vec![0.0; struct_mesh.node_count() * dim];
+
+    // Boundary faces of the mesh: a face occurring in exactly one element.
+    let element_faces = |cell: CellType, nodes: &[usize]| -> Vec<Vec<usize>> {
+        match cell {
+            CellType::Tri => vec![
+                vec![nodes[0], nodes[1]],
+                vec![nodes[1], nodes[2]],
+                vec![nodes[2], nodes[0]],
+            ],
+            CellType::Quad => vec![
+                vec![nodes[0], nodes[1]],
+                vec![nodes[1], nodes[2]],
+                vec![nodes[2], nodes[3]],
+                vec![nodes[3], nodes[0]],
+            ],
+            CellType::Tet => vec![
+                vec![nodes[0], nodes[1], nodes[2]],
+                vec![nodes[0], nodes[1], nodes[3]],
+                vec![nodes[0], nodes[2], nodes[3]],
+                vec![nodes[1], nodes[2], nodes[3]],
+            ],
+            CellType::Hex => vec![
+                vec![nodes[0], nodes[1], nodes[2], nodes[3]],
+                vec![nodes[4], nodes[5], nodes[6], nodes[7]],
+                vec![nodes[0], nodes[1], nodes[5], nodes[4]],
+                vec![nodes[1], nodes[2], nodes[6], nodes[5]],
+                vec![nodes[2], nodes[3], nodes[7], nodes[6]],
+                vec![nodes[3], nodes[0], nodes[4], nodes[7]],
+            ],
+            other => panic!("fsi_interface_loads: unsupported cell {other:?}"),
+        }
+    };
+    let mut face_count: std::collections::HashMap<Vec<usize>, usize> =
+        std::collections::HashMap::new();
+    let mut elem_of_face: std::collections::HashMap<Vec<usize>, usize> =
+        std::collections::HashMap::new();
+    for (eid, elem) in struct_mesh.elements.iter().enumerate() {
+        for face in element_faces(elem.cell_type, &elem.nodes) {
+            let mut key = face.clone();
+            key.sort_unstable();
+            *face_count.entry(key.clone()).or_insert(0) += 1;
+            elem_of_face.entry(key).or_insert(eid);
+        }
+    }
+
+    // Flip `nu` so it points away from the owning element's centroid.
+    let orient = |nu: &mut [f64], eid: usize, face_nodes: &[usize]| {
+        let mut xc = vec![0.0; dim];
+        for &nd in &struct_mesh.elements[eid].nodes {
+            let cc = coords(nd);
+            for a in 0..dim {
+                xc[a] += cc[a];
+            }
+        }
+        let nn = struct_mesh.elements[eid].nodes.len() as f64;
+        for a in 0..dim {
+            xc[a] /= nn;
+        }
+        let mut xm = vec![0.0; dim];
+        for &nd in face_nodes {
+            let cc = coords(nd);
+            for a in 0..dim {
+                xm[a] += cc[a];
+            }
+        }
+        for a in 0..dim {
+            xm[a] /= face_nodes.len() as f64;
+        }
+        let side: f64 = (0..dim).map(|a| (xm[a] - xc[a]) * nu[a]).sum();
+        if side < 0.0 {
+            for v in nu.iter_mut() {
+                *v = -*v;
+            }
+        }
+    };
+    // Consistent load of one linear triangle: f_i = n̂ A (2p_i + p_j + p_k)/12.
+    let add_tri = |loads: &mut Vec<f64>, tri: &[usize], n_hat: &[f64], area: f64| {
+            let p: Vec<f64> = tri.iter().map(|&n| press(n)).collect();
+            for i in 0..3 {
+                let w = area * (2.0 * p[i] + p[(i + 1) % 3] + p[(i + 2) % 3]) / 12.0;
+                for a in 0..dim {
+                    loads[tri[i] * dim + a] += n_hat[a] * w;
+                }
+            }
+        };
+
+    let mut covered = vec![false; struct_mesh.node_count()];
+    let mut seen: std::collections::HashSet<Vec<usize>> = std::collections::HashSet::new();
+    for (eid, elem) in struct_mesh.elements.iter().enumerate() {
+        for face in element_faces(elem.cell_type, &elem.nodes) {
+            let mut key = face.clone();
+            key.sort_unstable();
+            if face_count.get(&key).copied().unwrap_or(0) != 1 || !seen.insert(key) {
+                continue;
+            }
+            // An interface face has every node on the interface.
+            if !face.iter().all(|n| s_to_f.contains_key(n)) {
+                continue;
+            }
+            match dim {
+                2 => {
+                    let x0 = coords(face[0]);
+                    let x1 = coords(face[1]);
+                    let tx = x1[0] - x0[0];
+                    let ty = x1[1] - x0[1];
+                    let len = (tx * tx + ty * ty).sqrt();
+                    if len < 1e-14 {
+                        continue;
+                    }
+                    let mut nu = vec![ty / len, -tx / len];
+                    orient(&mut nu, eid, &face);
+                    let (p0, p1) = (press(face[0]), press(face[1]));
+                    for a in 0..2 {
+                        loads[face[0] * 2 + a] += nu[a] * len * (2.0 * p0 + p1) / 6.0;
+                        loads[face[1] * 2 + a] += nu[a] * len * (p0 + 2.0 * p1) / 6.0;
+                    }
+                    covered[face[0]] = true;
+                    covered[face[1]] = true;
+                }
+                _ => {
+                    // Triangulate the face fan-style around corner 0.
+                    let xs: Vec<Vec<f64>> = face.iter().map(|&n| coords(n)).collect();
+                    for k in 1..xs.len() - 1 {
+                        let e1: Vec<f64> = (0..3).map(|d| xs[k][d] - xs[0][d]).collect();
+                        let e2: Vec<f64> =
+                            (0..3).map(|d| xs[k + 1][d] - xs[0][d]).collect();
+                        let cr = [
+                            e1[1] * e2[2] - e1[2] * e2[1],
+                            e1[2] * e2[0] - e1[0] * e2[2],
+                            e1[0] * e2[1] - e1[1] * e2[0],
+                        ];
+                        let mag = (cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]).sqrt();
+                        if mag < 1e-14 {
+                            continue;
+                        }
+                        let mut nu = vec![cr[0] / mag, cr[1] / mag, cr[2] / mag];
+                        let sub = vec![face[0], face[k], face[k + 1]];
+                        orient(&mut nu, eid, &sub);
+                        add_tri(&mut loads, &sub, &nu, 0.5 * mag);
+                        for &nd in &sub {
+                            covered[nd] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback for isolated interface nodes that belong to no interface face
+    // (e.g. a single-node coupling): apply a lumped load p·n̂ with the
+    // geometry-aware outward normal estimated from the incident elements.
+    for &(s_node, f_node) in interface {
+        if covered[s_node] {
+            continue;
+        }
+        let c = coords(s_node);
+        let mut acc = vec![0.0; dim];
+        let mut n_elems = 0usize;
+        for elem in &struct_mesh.elements {
+            if elem.nodes.contains(&s_node) {
+                let mut xc = vec![0.0; dim];
+                for &nd in &elem.nodes {
+                    let cc = coords(nd);
+                    for a in 0..dim {
+                        xc[a] += cc[a];
+                    }
+                }
+                for a in 0..dim {
+                    xc[a] /= elem.nodes.len() as f64;
+                    acc[a] += c[a] - xc[a];
+                }
+                n_elems += 1;
+            }
+        }
+        let mut normal = if n_elems > 0 { acc } else { vec![0.0; dim] };
+        let mag = normal.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if mag > 1e-12 {
+            for a in 0..dim {
+                normal[a] /= mag;
+            }
+        } else if dim >= 2 {
+            normal[1] = 1.0; // degenerate fallback
+        } else {
+            normal[0] = 1.0;
+        }
+        for a in 0..dim {
+            loads[s_node * dim + a] += fluid_pressure[f_node] * normal[a];
+        }
+    }
+    loads
+}
+
+
 ///
 /// Given a structure displacement `u_struct` (global DOF order, `dim` per node)
 /// and a shared interface of `(structure_node, fluid_node)` pairs, this:
@@ -261,58 +491,18 @@ pub fn fsi_coupling(
     )
     .map_err(CouplingError::from)?;
 
-    // Transfer fluid pressure as a normal traction onto the structure interface.
-    // Neumann load per node = pressure * outward_normal. The normal is derived
-    // from the actual interface geometry: the average of (node - element
-    // centroid) over the structure elements incident on the interface node. For
-    // a convex/conforming mesh this points outward, so vertical or curved
-    // interfaces receive a correct (e.g. horizontal) traction direction rather
-    // than a hardcoded +y.
-    let mut neumann = vec![0.0; struct_mesh.node_count() * dim];
-    for &(s_node, f_node) in interface {
-        // Geometry-aware outward normal at the structure interface node.
-        let c = struct_mesh.node_coords(s_node).to_vec();
-        let mut acc = vec![0.0; dim];
-        let mut n_elems = 0usize;
-        for elem in &struct_mesh.elements {
-            if elem.nodes.contains(&s_node) {
-                let mut xc = vec![0.0; dim];
-                for &nd in &elem.nodes {
-                    let cc = struct_mesh.node_coords(nd);
-                    for a in 0..dim {
-                        xc[a] += cc[a];
-                    }
-                }
-                for a in 0..dim {
-                    xc[a] /= elem.nodes.len() as f64;
-                    acc[a] += c[a] - xc[a];
-                }
-                n_elems += 1;
-            }
-        }
-        let mut normal = if n_elems > 0 { acc } else { vec![0.0; dim] };
-        let mag = normal.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if mag > 1e-12 {
-            for a in 0..dim {
-                normal[a] /= mag;
-            }
-        } else if dim >= 2 {
-            normal[1] = 1.0; // degenerate fallback
-        } else {
-            normal[0] = 1.0;
-        }
-        for a in 0..dim {
-            neumann[s_node * dim + a] += pressure[f_node] * normal[a];
-        }
-    }
+    // Transfer fluid pressure as a normal traction onto the structure interface
+    // with the work-consistent boundary-face integration (see
+    // [`fsi_interface_loads`]): the traction is integrated over the interface
+    // faces with the face shape functions, giving the work-equivalent nodal
+    // loads for horizontal, vertical, and curved interfaces alike.
+    let neumann = fsi_interface_loads(struct_mesh, interface, &pressure);
     // Solve the structure with the transferred traction as a Neumann load.
     let k_full = try_assemble(struct_mesh, dim, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, 2)
     })
     .map_err(CouplingError::from)?;
     let mut rhs = vec![0.0; struct_mesh.node_count() * dim];
-    // Convert the per-node nodal traction into consistent nodal loads by a simple
-    // lumped projection (good for a smoke-level coupling check).
     for (i, v) in neumann.iter().enumerate() {
         rhs[i] += *v;
     }
@@ -536,5 +726,89 @@ mod tests {
             "structure should respond to fluid, got {}",
             u[s2 * 2 + 1]
         );
+    }
+
+    #[test]
+    fn fsi_consistent_load_uniform_pressure_top_edge() {
+        // Single unit Quad element [0,1]^2. Interface = the top edge (y=1).
+        // With constant pressure p on that edge the consistent load must be
+        // exactly p·L/2 straight up on each top node and zero elsewhere.
+        let mut b = MeshBuilder::new();
+        let n00 = b.add_node(vec![0.0, 0.0]);
+        let n10 = b.add_node(vec![1.0, 0.0]);
+        let n01 = b.add_node(vec![0.0, 1.0]);
+        let n11 = b.add_node(vec![1.0, 1.0]);
+        b.add_element(CellType::Quad, vec![n00, n10, n11, n01]);
+        let mesh = b.build();
+        let interface = [(n01, 0usize), (n11, 1usize)];
+        // Fluid "pressure" array indexed by fluid node id.
+        let pressure = vec![2.0_f64; 8];
+        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        for &(s, _) in &interface {
+            assert!(f[s * 2].abs() < 1e-14, "horizontal component {f:?}");
+            let expect = 2.0 * 1.0 / 2.0; // p·L/2
+            assert!(
+                (f[s * 2 + 1] - expect).abs() < 1e-12,
+                "vertical load {} != {expect}",
+                f[s * 2 + 1]
+            );
+        }
+        // Bottom nodes unloaded.
+        assert!(f[n00 * 2].abs() < 1e-14 && f[n00 * 2 + 1].abs() < 1e-14);
+        assert!(f[n10 * 2].abs() < 1e-14 && f[n10 * 2 + 1].abs() < 1e-14);
+        // Resultant equals ∫ p n̂ ds = (0, p·L).
+        let fy: f64 = f.chunks_exact(2).map(|c| c[1]).sum();
+        assert!((fy - 2.0).abs() < 1e-12, "resultant {fy}");
+    }
+
+    #[test]
+    fn fsi_consistent_load_vertical_interface_normal_points_outward() {
+        // Same unit element but the interface is the RIGHT edge (x=1): the
+        // outward normal must be +x, exercising geometry-aware orientation
+        // (the old hardcoded-+y behaviour would give zero vertical traction).
+        let mut b = MeshBuilder::new();
+        let n00 = b.add_node(vec![0.0, 0.0]);
+        let n10 = b.add_node(vec![1.0, 0.0]);
+        let n01 = b.add_node(vec![0.0, 1.0]);
+        let n11 = b.add_node(vec![1.0, 1.0]);
+        b.add_element(CellType::Quad, vec![n00, n10, n11, n01]);
+        let mesh = b.build();
+        let interface = [(n10, 0usize), (n11, 1usize)];
+        let pressure = vec![3.0_f64; 8];
+        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        for &(s, _) in &interface {
+            let expect = 3.0 * 1.0 / 2.0;
+            assert!(
+                (f[s * 2] - expect).abs() < 1e-12,
+                "+x load {} != {expect}",
+                f[s * 2]
+            );
+            assert!(f[s * 2 + 1].abs() < 1e-14, "vertical component {f:?}");
+        }
+    }
+
+    #[test]
+    fn fsi_consistent_load_linear_pressure_resultant() {
+        // Linearly varying pressure p(x) = x over the top edge of the unit
+        // element: the consistent load's resultant must equal
+        // ∫₀¹ x dx = 1/2 in +y, and moment balance about node (0,1) must hold:
+        // Σ x_i f_iy = ∫ x·p dx = 1/3.
+        let mut b = MeshBuilder::new();
+        let n00 = b.add_node(vec![0.0, 0.0]);
+        let n10 = b.add_node(vec![1.0, 0.0]);
+        let n01 = b.add_node(vec![0.0, 1.0]);
+        let n11 = b.add_node(vec![1.0, 1.0]);
+        b.add_element(CellType::Quad, vec![n00, n10, n11, n01]);
+        let mesh = b.build();
+        let interface = [(n01, 0usize), (n11, 1usize)];
+        let mut pressure = vec![0.0_f64; 8];
+        pressure[0] = 0.0; // fluid node above structure node (0,1)
+        pressure[1] = 1.0; // fluid node above structure node (1,1)
+        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        let fy: f64 = f.chunks_exact(2).map(|c| c[1]).sum();
+        assert!((fy - 0.5).abs() < 1e-12, "resultant {fy} != 0.5");
+        let moment =
+            f[n01 * 2 + 1] * 0.0 + f[n11 * 2 + 1] * 1.0;
+        assert!((moment - 1.0 / 3.0).abs() < 1e-12, "moment {moment} != 1/3");
     }
 }
