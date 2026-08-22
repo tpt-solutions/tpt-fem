@@ -738,5 +738,50 @@ mod tests {
             .map(|(_, u)| u[1].abs())
             .fold(0.0_f64, f64::max);
         assert!(max_u1 < 1e-6, "second DOF drifted: {max_u1}");
+        assert!(max_u1 < 1e-6, "second DOF drifted: {max_u1}");
+    }
+
+    #[test]
+    fn arc_length_near_singular_jacobian_away_from_fold() {
+        // Stress case flagged in todo.md (11c): a Jacobian that is *close to
+        // singular along the whole path*, not just at the fold. The second DOF
+        // carries stiffness eps = 1e-6, so det(J) ~ 1e-6 · (3u0² - 3)
+        // everywhere, while the fold itself is only at u0 = ±1. The bordered
+        // corrector must track through this ill-conditioned system without
+        // aborting, and the soft DOF must stay pinned at its equilibrium.
+        let eps = 1e-6;
+        let res = |u: &[f64], lam: f64| vec![u[0] * u[0] * u[0] - 3.0 * u[0] - lam, eps * u[1]];
+        let jac = |u: &[f64], _lam: f64| {
+            let mut c = Coo::new();
+            c.push(0, 0, 3.0 * u[0] * u[0] - 3.0);
+            c.push(1, 1, eps);
+            c
+        };
+        let opts = ArcLengthOptions {
+            initial_arc_length: 0.15,
+            target_arc_length: 0.15,
+            max_arc_length: 0.5,
+            max_steps: 800,
+            initial_direction: -1.0,
+            ..Default::default()
+        };
+        let u0 = [2.1038, 0.0];
+        let trace = arc_length_continuation(&u0, 3.0, &[], &[1.0, 0.0], res, jac, &opts).unwrap();
+        for (lam, u) in trace.iter().skip(1) {
+            let r = res(u, *lam);
+            assert!(r[0].abs() < 1e-5, "off-curve R0: {} at λ={lam}", r[0]);
+            // Soft-DOF equilibrium: eps·u1 = 0 holds exactly, but allow the
+            // solver tolerance scaled by 1/eps.
+            assert!(
+                r[1].abs() / eps < 1e-5,
+                "soft DOF drifted: u1 = {} at λ={lam}",
+                u[1]
+            );
+        }
+        let min_lam = trace.iter().map(|(l, _)| *l).fold(f64::INFINITY, f64::min);
+        assert!(
+            min_lam <= -1.7,
+            "did not reach the fold region, min λ = {min_lam}"
+        );
     }
 }

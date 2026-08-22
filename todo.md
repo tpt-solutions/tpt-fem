@@ -713,7 +713,7 @@ been implemented yet — tracked for a future pass.*
       `ElasticitySolution`, `ModalSolution`, `ModeShape`) gets no static
       typing today. Worth a `.pyi` alongside the module once the bound API
       stabilizes.
-- [ ] `tpt-fem-solve`/`tpt-fem-eigen`: per `todo.md:303-310`/`:298-302`, the
+- [x] `tpt-fem-solve`/`tpt-fem-eigen`: per `todo.md:303-310`/`:298-302`, the
       arc-length continuation and generalized Lanczos eigensolver are only
       verified against textbook/algebraic cases (an algebraic fold, a 2-bar
       snap-through truss, and standard modal problems) — no test coverage of
@@ -722,6 +722,25 @@ been implemented yet — tracked for a future pass.*
       stressing the shift-invert Lanczos restart). Low priority unless a
       user hits a real convergence failure, but worth flagging since these
       are the two most numerically delicate solvers in the workspace.
+      **Closed (2026-08-22):** added the missing robustness tests, and both
+       flagged failure modes turned out to be real:
+      - `tpt-fem-eigen`: with eigenvalues clustered in a ~4e-6 band, the
+        shift-invert Lanczos lost basis orthogonality (single-pass Gram-
+        Schmidt) and its extreme Ritz values were off by ~1e-2; fixed with
+        two full reorthogonalization passes ("twice is enough"), after which
+        the cluster resolves to ~1e-12. Separately, `solve_shifted` used
+        no-pivoting elimination and produced inf/NaN when the shift sat
+        inside the cluster (near-singular `K - sigma*M`); fixed with partial
+        pivoting plus collapsed-pivot regularisation to 1e-12, mirroring
+        `dense_solve` in `tpt-fem-solve`. Guarded by
+        `generalized_closely_clustered_eigenvalues` and
+        `generalized_shift_inside_cluster_is_accurate`.
+      - `tpt-fem-solve`: arc-length continuation already survives a Jacobian
+        that is near-singular along the whole path (soft DOF with stiffness
+        1e-6) thanks to the existing bordered-solve regularisation; now
+        pinned by `arc_length_near_singular_jacobian_away_from_fold`.
+- [x] `tpt-fem-solve`/`tpt-fem-eigen`: robustness coverage closed — see the
+      annotated entry above.
 
 ### 11d — Revisit periodically
 

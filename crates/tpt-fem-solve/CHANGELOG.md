@@ -5,6 +5,16 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Regression test `arc_length_near_singular_jacobian_away_from_fold`: traces
+  the cubic fold with a second DOF carrying stiffness 1e-6, so the Jacobian
+  is near-singular along the *entire* path rather than only at the limit
+  point; verifies the bordered corrector tracks through it and the soft DOF
+  stays at its equilibrium.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

@@ -346,7 +346,16 @@ fn solve_upper(l: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
 }
 
 /// Solve the dense symmetric system `(A - σ·I) x = b` by Gaussian elimination
-/// (the reduced `(K - σ·M)` is positive-definite for the shifts used here).
+/// with partial pivoting.
+///
+/// When the shift σ sits at or between clustered eigenvalues, `A - σ·I` is
+/// near-singular; without pivoting the elimination can divide by a pivot that
+/// has collapsed to (or through) zero and produce inf/NaN, poisoning the whole
+/// Lanczos recurrence. Pivoting keeps the solve finite, and a pivot that is
+/// still tiny after row exchange is regularised to `±1e-12` (mirroring
+/// `tpt-fem-solve`'s `dense_solve`) so the shift-invert operator stays usable:
+/// the huge but finite inverse maps the iteration onto the eigenpairs nearest
+/// σ, which is exactly the desired shift-invert behaviour.
 fn solve_shifted(a: &[Vec<f64>], sigma: f64, b: &[f64]) -> Vec<f64> {
     let n = a.len();
     let mut mat = vec![vec![0.0; n]; n];
@@ -357,7 +366,30 @@ fn solve_shifted(a: &[Vec<f64>], sigma: f64, b: &[f64]) -> Vec<f64> {
     }
     let mut x = b.to_vec();
     for col in 0..n {
-        let piv = mat[col][col];
+        // Partial pivoting: pick the largest remaining entry in this column.
+        let piv_row = (col..n)
+            .reduce(|best, r| {
+                if mat[r][col].abs() > mat[best][col].abs() {
+                    r
+                } else {
+                    best
+                }
+            })
+            .unwrap_or(col);
+        if piv_row != col {
+            mat.swap(piv_row, col);
+            x.swap(piv_row, col);
+        }
+        // Regularise a collapsed pivot instead of dividing by ~0.
+        let piv = if mat[col][col].abs() < 1e-12 {
+            if mat[col][col] < 0.0 {
+                -1e-12
+            } else {
+                1e-12
+            }
+        } else {
+            mat[col][col]
+        };
         for r in (col + 1)..n {
             let f = mat[r][col] / piv;
             for c in col..n {
@@ -367,7 +399,15 @@ fn solve_shifted(a: &[Vec<f64>], sigma: f64, b: &[f64]) -> Vec<f64> {
         }
     }
     for col in (0..n).rev() {
-        let piv = mat[col][col];
+        let piv = if mat[col][col].abs() < 1e-12 {
+            if mat[col][col] < 0.0 {
+                -1e-12
+            } else {
+                1e-12
+            }
+        } else {
+            mat[col][col]
+        };
         let mut s = x[col];
         for c in (col + 1)..n {
             s -= mat[col][c] * x[c];
@@ -394,10 +434,17 @@ fn shifted_lanczos(a: &[Vec<f64>], sigma: f64, m: usize) -> (Vec<Vec<f64>>, Vec<
         let w = solve_shifted(a, sigma, &basis[j]);
         let an = dot(&w, &basis[j]);
         let mut w = w;
-        for k in 0..=j {
-            let p = dot(&w, &basis[k]);
-            for d in 0..n {
-                w[d] -= p * basis[k][d];
+        // Two full Gram-Schmidt passes ("twice is enough"): one pass loses
+        // orthogonality whenever the shifted-inverse nearly cancels the
+        // current basis vector (which happens for clustered spectra, where
+        // the new direction can be orders of magnitude smaller than the
+        // rounding noise in the cancelled components).
+        for _pass in 0..2 {
+            for k in 0..=j {
+                let p = dot(&w, &basis[k]);
+                for d in 0..n {
+                    w[d] -= p * basis[k][d];
+                }
             }
         }
         alpha.push(an);
@@ -612,5 +659,105 @@ mod tests {
         vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert!((vals[0] - 0.5).abs() < 1e-5, "got {}", vals[0]);
         assert!((vals[1] - 1.5).abs() < 1e-5, "got {}", vals[1]);
+        assert!((vals[0] - 0.5).abs() < 1e-5, "got {}", vals[0]);
+        assert!((vals[1] - 1.5).abs() < 1e-5, "got {}", vals[1]);
+    }
+
+    /// Stiffness `I + delta·L` where `L` is the n-point free-free discrete
+    /// 1-D Laplacian. Its eigenvalues are `1 + delta·(2 - 2cos(kπ/(n+1)))`,
+    /// i.e. a tight cluster of width `~delta` around 1.
+    fn clustered_stiffness(n: usize, delta: f64) -> Coo {
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(i, i, 1.0 + delta * 2.0);
+            if i + 1 < n {
+                c.push(i, i + 1, -delta);
+                c.push(i + 1, i, -delta);
+            }
+        }
+        c
+    }
+
+    fn identity_mass(n: usize) -> Coo {
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(i, i, 1.0);
+        }
+        c
+    }
+
+    #[test]
+    fn generalized_closely_clustered_eigenvalues() {
+        // Stress case flagged in todo.md (11c): six eigenvalues packed into a
+        // band of width ~4e-6. The shift-invert operator maps them to very
+        // large, very close Ritz targets, stressing both the (K' - σ)⁻¹ solve
+        // and the projected Jacobi eigensolve. A full-dimension Lanczos basis
+        // must still resolve every member of the cluster to high accuracy.
+        let n = 6;
+        let delta = 1e-6;
+        let k = clustered_stiffness(n, delta);
+        let m = identity_mass(n);
+        let eigs = generalized_lanczos_eigs(&k, &m, 0.0, n, n).unwrap();
+        assert_eq!(eigs.len(), n, "expected the full spectrum back");
+        let mut vals: Vec<f64> = eigs.iter().map(|(l, _)| *l).collect();
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for (i, lam) in vals.iter().enumerate() {
+            let expected = 1.0
+                + delta
+                    * (2.0
+                        - 2.0 * (std::f64::consts::PI * (i + 1) as f64 / (n as f64 + 1.0)).cos());
+            assert!(
+                (lam - expected).abs() < 1e-9,
+                "cluster member {i}: got {lam}, want {expected}"
+            );
+        }
+        // Eigenpair residuals ||K x - lambda M x|| and M-orthonormality.
+        for (lam, x) in &eigs {
+            let mx = matvec(&m, x);
+            let kx = matvec(&k, x);
+            let res: f64 = kx
+                .iter()
+                .zip(&mx)
+                .map(|(a, b)| (a - lam * b) * (a - lam * b))
+                .sum::<f64>()
+                .sqrt();
+            assert!(res < 1e-6, "eigenpair residual {res} at λ={lam}");
+            assert!(
+                (dot(x, &mx) - 1.0).abs() < 1e-6,
+                "not M-normalised at λ={lam}"
+            );
+        }
+    }
+
+    #[test]
+    fn generalized_shift_inside_cluster_is_accurate() {
+        // Same clustered pencil, but with the shift σ placed *inside* the
+        // cluster: the shifted matrix K - σI is then near-singular (its
+        // smallest eigenvalue magnitude is ~1e-6), which is the hardest input
+        // for a shift-invert solve short of an exactly singular pencil. The
+        // recovered spectrum must still match the closed form, to a looser
+        // (but still strict) tolerance reflecting the ~1e6 condition number.
+        let n = 6;
+        let delta = 1e-6;
+        let k = clustered_stiffness(n, delta);
+        let m = identity_mass(n);
+        // Mid-cluster shift: halfway between members k=3 and k=4.
+        let s3 = 2.0 - 2.0 * (std::f64::consts::PI * 3.0 / (n as f64 + 1.0)).cos();
+        let s4 = 2.0 - 2.0 * (std::f64::consts::PI * 4.0 / (n as f64 + 1.0)).cos();
+        let sigma = 1.0 + delta * 0.5 * (s3 + s4);
+        let eigs = generalized_lanczos_eigs(&k, &m, sigma, 3, n).unwrap();
+        assert_eq!(eigs.len(), 3);
+        let mut vals: Vec<f64> = eigs.iter().map(|(l, _)| *l).collect();
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for (i, lam) in vals.iter().enumerate() {
+            let expected = 1.0
+                + delta
+                    * (2.0
+                        - 2.0 * (std::f64::consts::PI * (i + 1) as f64 / (n as f64 + 1.0)).cos());
+            assert!(
+                (lam - expected).abs() < 1e-4,
+                "cluster member {i}: got {lam}, want {expected}"
+            );
+        }
     }
 }
