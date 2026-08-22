@@ -232,8 +232,13 @@ clean → registry `planned`→`git`). All three pass `cargo test`, `cargo fmt
       trusted-read/write VTK usage, and vtkio 0.6.3 pins the vulnerable
       `quick-xml`/`lz4_flex` with no in-range patch available)
 - [x] `cargo fmt --all --check` clean
-- [ ] `tpt-rust-map/registry.toml` entries → `"git"`: deferred (sibling repo
-      not present in this workspace)
+- [x] `tpt-rust-map/registry.toml` entries → `"git"`. **Closed (2026-08-23):**
+      the sibling repo is now present — and it turned out the `tpt-fem-*`
+      entries had never been added there at all (not even as `planned`), so
+      all 27 workspace crates were inserted under a new
+      `domain = "engineering.fem"` section with `status = "git"`, correct
+      `wraps` lists, and one-line descriptions; `tpt-fem` marked
+      `umbrella = true`.
 
 ---
 
@@ -1012,10 +1017,14 @@ been implemented yet — tracked for a future pass.*
        `contact_pairs_octree`, verified against the brute-force scan on
        deterministic point clouds.
        Committed: `contact: octree spatial search`.
-- [ ] Adaptive mesh refinement (AMR) driven by a posteriori error
-       estimators — no crate currently does error-driven refinement.
-       **Still open** (largest remaining idea; needs a refinement-capable
-       mesh representation before estimators are useful).
+- [x] Adaptive mesh refinement (AMR) driven by a posteriori error
+       estimators. **Done (2026-08-23):** new `tpt-fem-amr` crate — 1-irregular
+       quadtree over `[0,1]²` with leaf refine/re-balance, hanging-node
+       elimination at assembly time (`u_h = (u_a + u_b)/2`), Q1 Poisson solve,
+       Zienkiewicz–Zhu gradient-recovery estimates, and Dörfler bulk marking in
+       a `solve_adaptive` identify–mark–refine loop bounded by an element
+       budget.
+       Committed: `amr: quadtree h-refinement with ZZ estimator`.
 - [x] Topology optimization module (SIMP/level-set) built on the existing
        `tpt-fem-elasticity` + `tpt-fem-solve` stack. **Done (SIMP):** new
        `tpt-fem-topopt` crate — `simp_optimize` with sensitivity density
