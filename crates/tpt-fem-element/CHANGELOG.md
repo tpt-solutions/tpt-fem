@@ -14,8 +14,12 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   panic when solving on 2-D Gmsh-imported meshes, which carry 3-component
   coordinates: the isoparametric Jacobian is now correctly built as the planar
   2×2 (or 1×1) map instead of attempting a 3×3 from a 2-wide gradient.
+- `mat_inv`'s 3×3 branch stored the cofactor terms in the wrong flat order
+  (not row-major), so the inverse Jacobian for `Tet4`/`Hex8` elements was
+  incorrect; the cofactors are now written out row-major to match the
+  documented `mat_inv` contract.
 
-## [0.1.0] - 2026-08-13
+## [0.1.0] - 2026-08-23
 
 ### Added
 

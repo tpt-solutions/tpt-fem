@@ -15,7 +15,7 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   time-stepping / iterative loops that previously re-ran `to_csr()` on every
   matvec.
 
-## [0.1.0] - 2026-08-13
+## [0.1.0] - 2026-08-23
 
 ### Added
 
@@ -32,5 +32,7 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 - Default `solve`/`solve_multi` backend swapped from `faer` sparse LU to the
   in-house dense LU, dropping the Apache-2.0-only `faer` dependency.
+- `tpt-math-linalg-dense` dependency now points at the published `0.1.0`
+  crates.io release instead of the git/vendored copy.
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-sparse-0.1.0

@@ -17,8 +17,12 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `examples/elasticity.toml` demonstrating the `elasticity`/`modal` schema.
 - A brief report summary (DOF count, solve time, result range) is printed after
   every solve so results can be sanity-checked without opening ParaView.
+- `amr` subcommand: adaptive h-refinement Poisson solve on `[0,1]^2`
+  (`tpt_fem::solve_adaptive`), with `--max-elements`, `--theta`, `--constant`,
+  and `-o/--output` flags exporting the refined quadtree mesh and solution to
+  ParaView `.vtk`.
 
-## [0.1.0] - 2026-08-13
+## [0.1.0] - 2026-08-23
 
 ### Added
 
