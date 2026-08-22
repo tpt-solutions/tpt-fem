@@ -1004,23 +1004,42 @@ been implemented yet — tracked for a future pass.*
        belongs at the repo root next to `spec.txt`. Moved to `spec2.txt` at the
        repo root.
 
-### 13d — Innovation ideas (not scoped, for future consideration)
+### 13d — Innovation ideas (status updated 2026-08-23)
 
-- [ ] BVH/octree contact spatial search (see 13a) — unlocks larger-scale
-      contact problems.
+- [x] BVH/octree contact spatial search (see 13a) — unlocks larger-scale
+       contact problems. **Done:** `tpt-fem-contact` now ships `Octree`
+       (pruned nearest-neighbour over a uniform octree) and
+       `contact_pairs_octree`, verified against the brute-force scan on
+       deterministic point clouds.
+       Committed: `contact: octree spatial search`.
 - [ ] Adaptive mesh refinement (AMR) driven by a posteriori error
-      estimators — no crate currently does error-driven refinement.
-- [ ] Topology optimization module (SIMP/level-set) built on the existing
-      `tpt-fem-elasticity` + `tpt-fem-solve` stack.
+       estimators — no crate currently does error-driven refinement.
+       **Still open** (largest remaining idea; needs a refinement-capable
+       mesh representation before estimators are useful).
+- [x] Topology optimization module (SIMP/level-set) built on the existing
+       `tpt-fem-elasticity` + `tpt-fem-solve` stack. **Done (SIMP):** new
+       `tpt-fem-topopt` crate — `simp_optimize` with sensitivity density
+       filtering, optimality-criteria update, and under-relaxation; level-set
+       remains a possible future extension.
 - [ ] GPU/SIMD-accelerated element assembly and sparse matvec — relevant
-      given the repeated per-step matvecs in `tpt-fem-dynamic`/`tpt-fem-fluid`
-      (also ties into the `coo_matvec` calling `to_csr()` on every invocation
-      performance smell in `tpt-fem-dynamic/src/lib.rs:64-79`).
+       given the repeated per-step matvecs in `tpt-fem-dynamic`/`tpt-fem-fluid`
+       (also ties into the `coo_matvec` calling `to_csr()` on every invocation
+       performance smell in `tpt-fem-dynamic/src/lib.rs:64-79`).
+       **Still open on the GPU side**; CPU-side hot loops were already
+       reworked in Phases 11/13e.
 - [ ] WASM in-browser interactive solve+visualize demo —
-      `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
-      `wasm32-unknown-unknown` per CI.
-- [ ] Consistent (non-lumped) FSI load transfer with real per-node interface
-      normals, replacing the hardcoded `+y` normal (see 13a).
-- [ ] Modal frequency-response coupling: combine `tpt-fem-eigen` modal
-      analysis with `tpt-fem-dynamic` Newmark integration for a
-      vibration/fatigue frequency-response workflow.
+       `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
+       `wasm32-unknown-unknown` per CI. **Still open** (needs a JS/UI host;
+       no browser toolchain exercised in this repo CI).
+- [x] Consistent (non-lumped) FSI load transfer with real per-node interface
+       normals, replacing the hardcoded `+y` normal (see 13a). **Done:**
+       `tpt-fem-coupling::fsi_interface_loads` integrates `p*n` over the
+       interface faces with shape functions (outward normals from the owning
+       element geometry); `fsi_coupling` uses it, with a lumped fallback only
+       for isolated single-node couplings.
+- [x] Modal frequency-response coupling: combine `tpt-fem-eigen` modal
+       analysis with `tpt-fem-dynamic` Newmark integration for a
+       vibration/fatigue frequency-response workflow. **Done:**
+       `tpt-fem-dynamic::modal_frequency_response` solves the generalized
+       eigenproblem via shift-invert Lanczos and evaluates the damped modal
+       sum across a frequency sweep (real/imaginary amplitudes).
