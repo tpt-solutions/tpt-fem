@@ -80,3 +80,21 @@ russell = ["tpt-fem-sparse/russell"]
 [lints]
 workspace = true
 
+# Advanced multi-crate showcases. Each chains several constituent crates into
+# an end-to-end physics pipeline with verification against analytical results.
+[[example]]
+name = "thermoelastic_plate_showcase"
+path = "examples/thermoelastic_plate_showcase.rs"
+required-features = ["coupling", "thermal", "io-vtk", "mesh", "sparse", "elasticity", "assembly"]
+
+[[example]]
+name = "contact_column_showcase"
+path = "examples/contact_column_showcase.rs"
+required-features = ["contact", "mesh", "elasticity", "assembly", "sparse"]
+
+[[example]]
+name = "cantilever_dynamics_showcase"
+path = "examples/cantilever_dynamics_showcase.rs"
+required-features = ["modal", "dynamic", "eigen", "mesh", "elasticity", "assembly", "sparse"]
+
+
