@@ -252,11 +252,16 @@ mod tests {
         // nearest neighbour (and distance) as the brute-force scan.
         let pts = lcg_points(400, 3);
         let queries = lcg_points(60, 3);
-        let indexed: Vec<(usize, Vec<f64>)> =
-            pts.iter().enumerate().map(|(i, c)| (i, c.clone())).collect();
+        let indexed: Vec<(usize, Vec<f64>)> = pts
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, c.clone()))
+            .collect();
         let tree = Octree::build(&indexed);
         for q in &queries {
-            let brute = contact_pairs(&[(0usize, q.clone())], &indexed)[0].1.unwrap();
+            let brute = contact_pairs(&[(0usize, q.clone())], &indexed)[0]
+                .1
+                .unwrap();
             let fast = tree.nearest(q).unwrap();
             assert_eq!(fast.0, brute.0, "different node for {q:?}");
             assert!((fast.1 - brute.1).abs() < 1e-12);

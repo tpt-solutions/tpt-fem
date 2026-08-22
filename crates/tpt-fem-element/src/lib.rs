@@ -661,14 +661,17 @@ fn mat_inv(n: usize, m: &[f64]) -> Vec<f64> {
                 + m[2] * (m[3] * m[7] - m[4] * m[6]);
             let inv = 1.0 / det;
             vec![
+                // Row 0 of the true inverse (cofactor matrix transposed).
                 (m[4] * m[8] - m[5] * m[7]) * inv,
-                (m[5] * m[6] - m[3] * m[8]) * inv,
-                (m[3] * m[7] - m[4] * m[6]) * inv,
                 (m[2] * m[7] - m[1] * m[8]) * inv,
-                (m[0] * m[8] - m[2] * m[6]) * inv,
-                (m[1] * m[6] - m[0] * m[7]) * inv,
                 (m[1] * m[5] - m[2] * m[4]) * inv,
+                // Row 1.
+                (m[5] * m[6] - m[3] * m[8]) * inv,
+                (m[0] * m[8] - m[2] * m[6]) * inv,
                 (m[2] * m[3] - m[0] * m[5]) * inv,
+                // Row 2.
+                (m[3] * m[7] - m[4] * m[6]) * inv,
+                (m[1] * m[6] - m[0] * m[7]) * inv,
                 (m[0] * m[4] - m[1] * m[3]) * inv,
             ]
         }
