@@ -106,21 +106,24 @@ pub fn coo_add(a: &Coo, b: &Coo) -> Coo {
 /// The output has the same length as `x` (a square `n×n` matrix times an
 /// `n`-vector); an empty matrix contributes the zero vector, which makes this
 /// safe to call with a zero/placeholder damping or mass matrix of any dimension.
+/// Matrix–vector product `y = A x` for a [`Coo`] matrix.
+///
+/// The output has the same length as `x` (a square `n×n` matrix times an
+/// `n`-vector); an empty matrix contributes the zero vector, which makes this
+/// safe to call with a zero/placeholder damping or mass matrix of any dimension.
+///
+/// # Cost note
+///
+/// This converts `coo` to CSR on **every** call. Inside time-stepping or
+/// iterative loops, convert once with [`Coo::to_csr`] and use
+/// [`Csr::matvec`](tpt_fem_sparse::Csr::matvec) instead — that is what the
+/// integrators in this crate do internally.
 pub fn coo_matvec(coo: &Coo, x: &[f64]) -> Vec<f64> {
     let n = x.len();
     if coo.rows.is_empty() {
         return vec![0.0; n];
     }
-    let csr = coo.to_csr();
-    let mut y = vec![0.0; n];
-    for r in 0..n.min(csr.nrows) {
-        let mut s = 0.0;
-        for c in csr.row_ptrs[r]..csr.row_ptrs[r + 1] {
-            s += csr.values[c] * x[csr.col_ind[c]];
-        }
-        y[r] = s;
-    }
-    y
+    coo.to_csr().matvec(x)
 }
 
 /// Options for the [`newmark`] integrator.
@@ -164,10 +167,16 @@ pub fn newmark(
     let b = opts.beta;
     let g = opts.gamma;
 
+    // Convert the constant operators to CSR once; every step below does two
+    // matvecs against damping and stiffness, and re-converting per call would
+    // dominate the runtime on anything but toy problems.
+    let csr_d = damping.to_csr();
+    let csr_k = stiffness.to_csr();
+
     // Initial acceleration a0 = M⁻¹ (f0 - C v0 - K u0).
     let f0 = f(0.0);
     let r0: Vec<f64> = (0..n)
-        .map(|i| f0[i] - coo_matvec(damping, v0)[i] - coo_matvec(stiffness, u0)[i])
+        .map(|i| f0[i] - csr_d.matvec(v0)[i] - csr_k.matvec(u0)[i])
         .collect();
     let a0 = solve(mass, &r0).expect("mass matrix must be invertible");
 
@@ -179,6 +188,7 @@ pub fn newmark(
             &coo_scale(damping, g / (b * dt)),
         ),
     );
+    let csr_m = mass.to_csr();
 
     let mut history = Vec::with_capacity(nsteps + 1);
     let mut u = u0.to_vec();
@@ -197,7 +207,7 @@ pub fn newmark(
             .map(|i| g / (b * dt) * u[i] + (g / b - 1.0) * v[i] + dt * (g / (2.0 * b) - 1.0) * a[i])
             .collect();
         let rhs: Vec<f64> = (0..n)
-            .map(|i| ft[i] + coo_matvec(mass, &p_m)[i] + coo_matvec(damping, &p_c)[i])
+            .map(|i| ft[i] + csr_m.matvec(&p_m)[i] + csr_d.matvec(&p_c)[i])
             .collect();
 
         let u_new = solve(&k_hat, &rhs).expect("effective stiffness must be invertible");
@@ -269,13 +279,12 @@ pub fn central_difference(
     // diverging.
     let mut rho_max = 0.0_f64;
     let mut has_mass = false;
+    let csr_k = stiffness.to_csr();
     for i in 0..n {
         if mdiag[i] > 0.0 {
             let mut row_sum = 0.0_f64;
-            for idx in 0..stiffness.rows.len() {
-                if stiffness.rows[idx] == i {
-                    row_sum += stiffness.vals[idx].abs();
-                }
+            for idx in csr_k.row_ptrs[i]..csr_k.row_ptrs[i + 1] {
+                row_sum += csr_k.values[idx].abs();
             }
             rho_max = rho_max.max(row_sum / mdiag[i]);
             has_mass = true;
@@ -294,8 +303,9 @@ pub fn central_difference(
     }
 
     let f0 = f(0.0);
+    let csr_d = damping.to_csr();
     let a0: Vec<f64> = inv(&(0..n)
-        .map(|i| f0[i] - coo_matvec(damping, v0)[i] - coo_matvec(stiffness, u0)[i])
+        .map(|i| f0[i] - csr_d.matvec(v0)[i] - csr_k.matvec(u0)[i])
         .collect::<Vec<_>>());
 
     let mut history = Vec::with_capacity(nsteps + 1);
@@ -307,7 +317,7 @@ pub fn central_difference(
         let t = step as f64 * dt;
         let ft = f(t);
         let a: Vec<f64> = inv(&(0..n)
-            .map(|i| ft[i] - coo_matvec(damping, &v_half)[i] - coo_matvec(stiffness, &u)[i])
+            .map(|i| ft[i] - csr_d.matvec(&v_half)[i] - csr_k.matvec(&u)[i])
             .collect::<Vec<_>>());
         let mut v_next = v_half.clone();
         for i in 0..n {
@@ -380,7 +390,7 @@ pub fn modal_frequency_response(
     frequencies_hz: &[f64],
     lanczos_dim: usize,
 ) -> Result<ModalFrequencyResponse, DynamicError> {
-    if !(zeta >= 0.0) {
+    if zeta.is_nan() || zeta < 0.0 {
         return Err(DynamicError::InvalidInput(
             "zeta must be non-negative".into(),
         ));
@@ -512,8 +522,7 @@ mod tests {
         // imaginary (90° phase lag), negative imaginary part.
         let (k, m) = diag2();
         let f_res = 2.0 / std::f64::consts::TAU;
-        let resp = modal_frequency_response(&k, &m, &[1.0], 0.05, 1, &[0.0, f_res], 1)
-            .unwrap();
+        let resp = modal_frequency_response(&k, &m, &[1.0], 0.05, 1, &[0.0, f_res], 1).unwrap();
         assert!((resp.displacement_real[0][0] - 0.25).abs() < 1e-12);
         assert!(resp.displacement_imag[0][0].abs() < 1e-12);
         let mag = resp.magnitude(1, 0);
@@ -566,8 +575,7 @@ mod tests {
             ],
         ];
         let freqs = [omega / std::f64::consts::TAU];
-        let resp =
-            modal_frequency_response(&k, &m, &[1.0, 0.0], zeta, 2, &freqs, 2).unwrap();
+        let resp = modal_frequency_response(&k, &m, &[1.0, 0.0], zeta, 2, &freqs, 2).unwrap();
         for kdof in 0..2 {
             assert!(
                 (resp.displacement_real[0][kdof] - expect[kdof][0]).abs() < 1e-10,
@@ -584,8 +592,7 @@ mod tests {
         }
         // Mode frequencies reported back in Hz.
         assert!(
-            (resp.mode_frequencies_hz[0] - 4.0_f64.sqrt() / std::f64::consts::TAU).abs()
-                < 1e-8
+            (resp.mode_frequencies_hz[0] - 4.0_f64.sqrt() / std::f64::consts::TAU).abs() < 1e-8
         );
     }
 

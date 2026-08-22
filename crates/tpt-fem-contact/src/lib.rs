@@ -441,7 +441,9 @@ mod tests {
         for _ in 0..n {
             let mut p = Vec::with_capacity(dim);
             for _ in 0..dim {
-                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                s = s
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 p.push((s >> 11) as f64 / (1u64 << 53) as f64);
             }
             out.push(p);
@@ -458,11 +460,14 @@ mod tests {
         let tree = Octree::new(&pts, 8, 24);
         assert_eq!(tree.len(), 400);
         for q in &queries {
-            let brute = contact_pairs(&[(0usize, q.clone())], &(0..pts.len())
-                .map(|i| (i, pts[i].clone()))
-                .collect::<Vec<_>>())[0]
-                .1
-                .unwrap();
+            let brute = contact_pairs(
+                &[(0usize, q.clone())],
+                &(0..pts.len())
+                    .map(|i| (i, pts[i].clone()))
+                    .collect::<Vec<_>>(),
+            )[0]
+            .1
+            .unwrap();
             let fast = tree.nearest(q).unwrap();
             assert_eq!(fast.0, brute.0, "different node for {q:?}");
             assert!((fast.1.sqrt() - brute.1).abs() < 1e-12);
@@ -487,10 +492,16 @@ mod tests {
     fn contact_pairs_octree_agrees_with_brute_force() {
         let pa = lcg_points(50, 3);
         let pb = lcg_points(500, 3);
-        let a: Vec<(usize, Vec<f64>)> =
-            pa.iter().enumerate().map(|(i, c)| (100 + i, c.clone())).collect();
-        let b: Vec<(usize, Vec<f64>)> =
-            pb.iter().enumerate().map(|(i, c)| (2000 + i, c.clone())).collect();
+        let a: Vec<(usize, Vec<f64>)> = pa
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (100 + i, c.clone()))
+            .collect();
+        let b: Vec<(usize, Vec<f64>)> = pb
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (2000 + i, c.clone()))
+            .collect();
         let brute = contact_pairs(&a, &b);
         let fast = contact_pairs_octree(&a, &b);
         assert_eq!(brute.len(), fast.len());

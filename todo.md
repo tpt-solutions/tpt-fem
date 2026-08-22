@@ -1021,12 +1021,12 @@ been implemented yet — tracked for a future pass.*
        `tpt-fem-topopt` crate — `simp_optimize` with sensitivity density
        filtering, optimality-criteria update, and under-relaxation; level-set
        remains a possible future extension.
-- [ ] GPU/SIMD-accelerated element assembly and sparse matvec — relevant
-       given the repeated per-step matvecs in `tpt-fem-dynamic`/`tpt-fem-fluid`
-       (also ties into the `coo_matvec` calling `to_csr()` on every invocation
-       performance smell in `tpt-fem-dynamic/src/lib.rs:64-79`).
-       **Still open on the GPU side**; CPU-side hot loops were already
-       reworked in Phases 11/13e.
+- [ ] GPU/SIMD-accelerated element assembly and sparse matvec
+       (also ties into the "coo_matvec" calling "to_csr()" on every invocation
+       performance smell). **CPU half done (2026-08-23):** tpt-fem-sparse gained
+       Csr::matvec and tpt-fem-dynamic newmark/central_difference now hoist the
+       Coo-to-CSR conversion out of the step loop (also fixing the coo_matvec
+       smell). GPU offload remains out of scope.
 - [ ] WASM in-browser interactive solve+visualize demo —
        `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
        `wasm32-unknown-unknown` per CI. **Still open** (needs a JS/UI host;

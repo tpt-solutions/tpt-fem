@@ -18,6 +18,16 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `DynamicError::Sparse` / `DynamicError::InvalidInput` variants for the new
   workflow's failure modes.
 
+### Changed
+
+- `newmark` / `central_difference` now convert the constant `C`/`K`/`M`
+  operators to CSR once per run and use `Csr::matvec` inside the step loop,
+  instead of re-running the `Coo`→CSR conversion on every matvec (the
+  `coo_matvec` performance smell flagged in todo.md 13d). `coo_matvec` itself
+  now delegates to `Csr::matvec`; the CFL row-sum guard also uses the CSR
+  row structure instead of a full triplet scan per DOF. Results are
+  unchanged (all integrator tests pass bit-for-bit within tolerance).
+
 ## [0.1.0] - 2026-08-20
 
 ### Added

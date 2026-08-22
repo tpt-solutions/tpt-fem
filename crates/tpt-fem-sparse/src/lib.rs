@@ -180,6 +180,29 @@ impl Csr {
     pub fn nnz(&self) -> usize {
         self.values.len()
     }
+
+    /// Matrix–vector product `y = A x` using the compressed rows.
+    ///
+    /// The row-contiguous storage lets the scalar accumulation loop be
+    /// auto-vectorised, and — unlike [`Coo::to_csr`] — the conversion cost is
+    /// paid once by the caller, not on every call. Prefer this in time-stepping
+    /// or iterative loops: convert with [`Coo::to_csr`] once, then call
+    /// [`Csr::matvec`] per iteration.
+    ///
+    /// `y` has `max(nrows, x.len())` entries (so a placeholder/empty matrix
+    /// still yields a correctly-sized zero vector); `x` must have at least
+    /// `ncols` entries (extra entries are ignored, a short `x` panics on index).
+    pub fn matvec(&self, x: &[f64]) -> Vec<f64> {
+        let mut y = vec![0.0; self.nrows.max(x.len())];
+        for r in 0..self.nrows {
+            let mut s = 0.0;
+            for c in self.row_ptrs[r]..self.row_ptrs[r + 1] {
+                s += self.values[c] * x[self.col_ind[c]];
+            }
+            y[r] = s;
+        }
+        y
+    }
 }
 
 /// Solve the square linear system `A x = b`, where `A` is supplied as a
@@ -471,5 +494,32 @@ mod russell_tests {
         for (a, b) in x2.iter().zip(&both[1]) {
             assert!((a - b).abs() < 1e-10);
         }
+    }
+
+    #[test]
+    fn csr_matvec_matches_dense() {
+        // A = [[2, 1], [0, 3]] (row 1 has an implicit zero), x = [1, -2]:
+        // A·x = [0, -6].
+        let mut c = Coo::new();
+        c.push(0, 0, 2.0);
+        c.push(0, 1, 1.0);
+        c.push(1, 1, 3.0);
+        let csr = c.to_csr();
+        assert_eq!(csr.nnz(), 3);
+        let y = csr.matvec(&[1.0, -2.0]);
+        assert_eq!(y.len(), 2);
+        assert!(y[0].abs() < 1e-14);
+        assert!((y[1] + 6.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn csr_matvec_empty_matrix_is_zero_vector() {
+        // A placeholder/empty matrix must return a zero vector of the input's
+        // length — the contract `coo_matvec` relies on for optional operators
+        // like damping.
+        let csr = Coo::new().to_csr();
+        let y = csr.matvec(&[1.0, 2.0, 3.0]);
+        assert_eq!(y.len(), 3);
+        assert!(y.iter().all(|&v| v == 0.0));
     }
 }

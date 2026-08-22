@@ -194,8 +194,7 @@ pub fn fsi_interface_loads(
         CellType::Tet | CellType::Hex => 3,
         other => panic!("fsi_interface_loads: unsupported cell {other:?}"),
     };
-    let mut s_to_f: std::collections::HashMap<usize, usize> =
-        std::collections::HashMap::new();
+    let mut s_to_f: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for &(s, f) in interface {
         s_to_f.insert(s, f);
     }
@@ -284,14 +283,14 @@ pub fn fsi_interface_loads(
     };
     // Consistent load of one linear triangle: f_i = n̂ A (2p_i + p_j + p_k)/12.
     let add_tri = |loads: &mut Vec<f64>, tri: &[usize], n_hat: &[f64], area: f64| {
-            let p: Vec<f64> = tri.iter().map(|&n| press(n)).collect();
-            for i in 0..3 {
-                let w = area * (2.0 * p[i] + p[(i + 1) % 3] + p[(i + 2) % 3]) / 12.0;
-                for a in 0..dim {
-                    loads[tri[i] * dim + a] += n_hat[a] * w;
-                }
+        let p: Vec<f64> = tri.iter().map(|&n| press(n)).collect();
+        for i in 0..3 {
+            let w = area * (2.0 * p[i] + p[(i + 1) % 3] + p[(i + 2) % 3]) / 12.0;
+            for a in 0..dim {
+                loads[tri[i] * dim + a] += n_hat[a] * w;
             }
-        };
+        }
+    };
 
     let mut covered = vec![false; struct_mesh.node_count()];
     let mut seen: std::collections::HashSet<Vec<usize>> = std::collections::HashSet::new();
@@ -331,8 +330,7 @@ pub fn fsi_interface_loads(
                     let xs: Vec<Vec<f64>> = face.iter().map(|&n| coords(n)).collect();
                     for k in 1..xs.len() - 1 {
                         let e1: Vec<f64> = (0..3).map(|d| xs[k][d] - xs[0][d]).collect();
-                        let e2: Vec<f64> =
-                            (0..3).map(|d| xs[k + 1][d] - xs[0][d]).collect();
+                        let e2: Vec<f64> = (0..3).map(|d| xs[k + 1][d] - xs[0][d]).collect();
                         let cr = [
                             e1[1] * e2[2] - e1[2] * e2[1],
                             e1[2] * e2[0] - e1[0] * e2[2],
@@ -397,7 +395,6 @@ pub fn fsi_interface_loads(
     }
     loads
 }
-
 
 ///
 /// Given a structure displacement `u_struct` (global DOF order, `dim` per node)
@@ -807,8 +804,7 @@ mod tests {
         let f = fsi_interface_loads(&mesh, &interface, &pressure);
         let fy: f64 = f.chunks_exact(2).map(|c| c[1]).sum();
         assert!((fy - 0.5).abs() < 1e-12, "resultant {fy} != 0.5");
-        let moment =
-            f[n01 * 2 + 1] * 0.0 + f[n11 * 2 + 1] * 1.0;
+        let moment = f[n01 * 2 + 1] * 0.0 + f[n11 * 2 + 1] * 1.0;
         assert!((moment - 1.0 / 3.0).abs() < 1e-12, "moment {moment} != 1/3");
     }
 }
