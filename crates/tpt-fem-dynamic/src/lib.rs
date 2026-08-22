@@ -33,7 +33,7 @@
 //! assert!((u[0] - want).abs() < 1e-3, "got {} want {}", u[0], want);
 //! ```
 
-use tpt_fem_sparse::{solve, Coo};
+use tpt_fem_sparse::{solve, Coo, Csr};
 
 /// Errors returned by the time-integration routines.
 #[derive(Debug)]
@@ -101,7 +101,7 @@ pub fn coo_add(a: &Coo, b: &Coo) -> Coo {
     out
 }
 
-/// Matrix–vector product `y = A x` for a [`Coo`] matrix.
+/// Matrix–vector product `y = A x` for a [`Csr`] matrix.
 ///
 /// The output has the same length as `x` (a square `n×n` matrix times an
 /// `n`-vector); an empty matrix contributes the zero vector, which makes this
@@ -124,6 +124,64 @@ pub fn coo_matvec(coo: &Coo, x: &[f64]) -> Vec<f64> {
         return vec![0.0; n];
     }
     coo.to_csr().matvec(x)
+}
+
+/// Matrix–vector product `y = A x` for a [`Coo`] matrix (single-shot
+/// convenience).
+///
+/// This builds the CSR representation internally, so it is correct but
+/// **not** suitable for the per-step hot loop of a time integrator — convert
+/// once with [`Coo::to_csr`] and use [`csr_matvec`] there. The output has the
+/// same length as `x`; an empty matrix contributes the zero vector.
+pub fn coo_matvec(coo: &Coo, x: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    if coo.rows.is_empty() {
+        return vec![0.0; n];
+    }
+    csr_matvec(&coo.to_csr(), x)
+}
+
+/// A second-order operator `M·ü + C·v + K·u = f(t)` pre-compiled to CSR.
+///
+/// Construct once from the [`Coo`] mass/damping/stiffness and use
+/// [`CachedSystem::apply_mass`] / [`apply_damping`](Self::apply_damping) /
+/// [`apply_stiffness`](Self::apply_stiffness) for the repeated per-step matvecs
+/// of a time integrator, so the triplet→CSR conversion happens a single time
+/// instead of on every call (the former `coo_matvec`-in-a-loop performance
+/// smell).
+pub struct CachedSystem {
+    /// Mass matrix (CSR).
+    pub mass: Csr,
+    /// Damping matrix (CSR).
+    pub damping: Csr,
+    /// Stiffness matrix (CSR).
+    pub stiffness: Csr,
+}
+
+impl CachedSystem {
+    /// Compile `mass`/`damping`/`stiffness` to CSR exactly once.
+    pub fn new(mass: &Coo, damping: &Coo, stiffness: &Coo) -> Self {
+        CachedSystem {
+            mass: mass.to_csr(),
+            damping: damping.to_csr(),
+            stiffness: stiffness.to_csr(),
+        }
+    }
+
+    /// `y = M x`.
+    pub fn apply_mass(&self, x: &[f64]) -> Vec<f64> {
+        csr_matvec(&self.mass, x)
+    }
+
+    /// `y = C x`.
+    pub fn apply_damping(&self, x: &[f64]) -> Vec<f64> {
+        csr_matvec(&self.damping, x)
+    }
+
+    /// `y = K x`.
+    pub fn apply_stiffness(&self, x: &[f64]) -> Vec<f64> {
+        csr_matvec(&self.stiffness, x)
+    }
 }
 
 /// Options for the [`newmark`] integrator.
@@ -259,7 +317,11 @@ pub fn central_difference(
 ) -> Result<Vec<(f64, Vec<f64>)>, DynamicError> {
     let n = u0.len();
     let dt = opts.dt;
-    let csr_m = mass.to_csr();
+    // Pre-compile all three operators to CSR once; the CFL check below still
+    // reads the (one-time) stiffness triplets, but the per-step matvecs use the
+    // cached CSR rather than rebuilding it each call.
+    let sys = CachedSystem::new(mass, damping, stiffness);
+    let csr_m = &sys.mass;
     let mut mdiag = vec![0.0; n];
     for r in 0..n {
         let mut s = 0.0;

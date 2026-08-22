@@ -784,4 +784,36 @@ mod tests {
             "did not reach the fold region, min λ = {min_lam}"
         );
     }
+
+    #[test]
+    fn arc_length_near_singular_tangent_does_not_panic() {
+        // Residual R(u,λ) = k·u - λ with a very small (near-singular) stiffness
+        // k. The tangent Kt = k is ill-conditioned (close to singular) at every
+        // point — away from any fold — so this stresses the driver with a
+        // poorly-scaled Jacobian. The arc-length controller must trace the curve
+        // (regularising the near-singular pivot) rather than panicking.
+        // Regression for todo.md:716.
+        let k = 1e-3;
+        let res = move |u: &[f64], lam: f64| vec![k * u[0] - lam];
+        let jac = move |_u: &[f64], _lam: f64| {
+            let mut c = Coo::new();
+            c.push(0, 0, k);
+            c
+        };
+        let opts = ArcLengthOptions {
+            initial_arc_length: 0.15,
+            target_arc_length: 0.15,
+            max_arc_length: 0.5,
+            max_steps: 200,
+            ..Default::default()
+        };
+        let trace = arc_length_continuation(&[0.0], 0.0, &[], &[1.0], res, jac, &opts);
+        // Must return a Result (never panic); a successful trace stays on-curve.
+        let trace = trace.expect("near-singular arc-length should not panic");
+        assert!(trace.len() >= 2);
+        for (lam, u) in trace.iter().skip(1) {
+            let r = (k * u[0] - lam).abs();
+            assert!(r < 1e-4, "off-curve residual {r} at λ={lam}");
+        }
+    }
 }

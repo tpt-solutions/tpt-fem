@@ -6,9 +6,11 @@
 //! [`ContactConstraint`]s (each a global DOF constrained to stay at or above a
 //! lower bound — e.g. a node's normal coordinate relative to a rigid obstacle).
 //!
-//! A minimal from-scratch [`contact_pairs`] helper performs brute-force
-//! nearest-node pairing between two surfaces (a full BVH/octree is a future
-//! optimisation; the constraint enforcement below is independent of the search).
+//! A minimal from-scratch [`contact_pairs`] helper performs nearest-node
+//! pairing between two surfaces using the dependency-free [`Octree`] spatial
+//! index (an amortised O(|a|·log|b|) lookup that replaces the earlier
+//! O(|a|·|b|) brute-force scan), so surface-to-surface contact scales to larger
+//! meshes. The constraint enforcement below is independent of the search.
 //!
 //! ```
 //! use tpt_fem_contact::{augmented_lagrangian, ContactConstraint};
@@ -25,6 +27,9 @@
 //! ```
 
 use tpt_fem_sparse::{solve, Coo};
+
+mod octree;
+pub use octree::Octree;
 
 /// A unilateral constraint `x_dof ≥ lower` (non-penetration against a rigid
 /// obstacle located at `lower` along the constrained DOF's axis).
@@ -98,36 +103,35 @@ pub fn augmented_lagrangian(
     (u, lambda)
 }
 
-/// Brute-force nearest-node pairing between two surfaces `a` and `b` (each a
-/// list of `(node_id, coords)`).
+/// Nearest-node pairing between two surfaces `a` and `b` (each a list of
+/// `(node_id, coords)`), accelerated by the dependency-free [`Octree`] spatial
+/// index.
 ///
 /// For every node in `a`, returns `(node_id, Some((index_in_b, gap)))` for its
 /// closest node in `b`, or `(node_id, None)` if `b` is empty (there is nothing
 /// to pair with — callers must handle the `None` rather than indexing a
-/// sentinel). The scan is O(|a|·|b|) and dependency-free; a spatial acceleration
-/// structure (BVH/octree) is a future optimisation and the constraint
-/// enforcement below is independent of the search.
+/// sentinel). The search is an amortised O(|a|·log|b|) lookup (degrading to a
+/// linear scan only when `b` is tiny); the constraint enforcement elsewhere in
+/// this crate is independent of the search.
 pub fn contact_pairs(
     a: &[(usize, Vec<f64>)],
     b: &[(usize, Vec<f64>)],
 ) -> Vec<(usize, Option<(usize, f64)>)> {
-    let mut out = Vec::with_capacity(a.len());
-    for (na, ca) in a.iter() {
-        let mut best: Option<(usize, f64)> = None;
-        for (ib, (_nb, cb)) in b.iter().enumerate() {
-            let d: f64 = ca
-                .iter()
-                .zip(cb)
-                .map(|(x, y)| (x - y) * (x - y))
-                .sum::<f64>()
-                .sqrt();
-            if best.map_or(true, |(_, bd)| d < bd) {
-                best = Some((ib, d));
-            }
-        }
-        out.push((*na, best));
+    if b.is_empty() {
+        return a.iter().map(|(na, _)| (*na, None)).collect();
     }
-    out
+    let b_indexed: Vec<(usize, Vec<f64>)> = b
+        .iter()
+        .enumerate()
+        .map(|(i, (_, c))| (i, c.clone()))
+        .collect();
+    let tree = Octree::build(&b_indexed);
+    a.iter()
+        .map(|(na, ca)| {
+            let best = tree.nearest(ca);
+            (*na, best)
+        })
+        .collect()
 }
 
 /// Uniform octree over a fixed point set, for fast nearest-neighbour queries.

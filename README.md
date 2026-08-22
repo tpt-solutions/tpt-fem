@@ -26,6 +26,17 @@ crates are consumed as path dependencies within the workspace.
 | [`tpt-fem-io-abaqus`](crates/tpt-fem-io-abaqus) | Abaqus `.inp` reader/writer. | `tpt-fem-mesh` |
 | [`tpt-fem-io-exodus`](crates/tpt-fem-io-exodus) | Exodus II reader/writer (hand-rolled NetCDF-3 codec). | `tpt-fem-mesh` |
 | [`tpt-fem-mesh-gen`](crates/tpt-fem-mesh-gen) | Native 3-D tetrahedral mesh generation (Delaunay + structured box), dependency-free. | `tpt-fem-mesh` |
+| [`tpt-fem-dofmap`](crates/tpt-fem-dofmap) | Multi-field DOF map: per-field `dofs_per_node`, block/interleaved numbering. | `tpt-fem-mesh` |
+| [`tpt-fem-dynamic`](crates/tpt-fem-dynamic) | Time integration: implicit Newmark-β/HHT-α and explicit central-difference over generic M/C/K. | `tpt-fem-{sparse,assembly}` |
+| [`tpt-fem-plasticity`](crates/tpt-fem-plasticity) | J2 (von Mises) plasticity with isotropic/kinematic hardening (radial return). | `tpt-fem-{assembly,solve}` |
+| [`tpt-fem-hyperelastic`](crates/tpt-fem-hyperelastic) | Neo-Hookean, Mooney-Rivlin, Ogden soft-tissue models. | `tpt-fem-{assembly,solve}` |
+| [`tpt-fem-composite`](crates/tpt-fem-composite) | Classical lamination theory and cohesive-zone delamination. | `tpt-fem-elasticity` |
+| [`tpt-fem-porous`](crates/tpt-fem-porous) | Biot consolidation and Darcy flow (steady + transient). | `tpt-fem-{assembly,dynamic}` |
+| [`tpt-fem-contact`](crates/tpt-fem-contact) | Surface-to-surface contact (penalty + augmented Lagrangian), wear. | `tpt-fem-{assembly,dofmap}` |
+| [`tpt-fem-fluid`](crates/tpt-fem-fluid) | Stokes and low-Re Navier-Stokes (mixed elements, transient). | `tpt-fem-{dofmap,dynamic,assembly,solve}` |
+| [`tpt-fem-coupling`](crates/tpt-fem-coupling) | Multiphysics: thermal-structural, electro-thermal, fluid-structure. | `tpt-fem-{thermal,elasticity,fluid,dofmap,dynamic}` |
+| [`tpt-fem-modal`](crates/tpt-fem-modal) | Modal analysis + frequency-response / modal superposition. | `tpt-fem-{eigen,sparse,dynamic}` |
+| [`tpt-fem-topopt`](crates/tpt-fem-topopt) | SIMP topology optimization for 2-D linear elasticity. | `tpt-fem-{sparse,assembly,element,quadrature}` |
 | [`tpt-fem`](crates/tpt-fem) | Umbrella crate re-exporting all of the above behind Cargo features, plus `prelude` and end-to-end tests. | all of the above |
 | [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `mesh info`, `mesh convert`. | `tpt-fem` |
 
@@ -37,7 +48,10 @@ Every crate is tracked as `git` in the sibling
 The `tpt-fem` umbrella re-exports each constituent behind a Cargo feature
 (`quadrature`, `element`, `mesh`, `sparse`, `assembly`, `thermal`, `io-vtk`,
 `elasticity`, `solve`, `eigen`, `io-abaqus`, `io-exodus`, `mesh-gen`). **All are
-enabled by default.** `use tpt_fem::prelude::*;` pulls in the public API of every
+enabled by default.** The advanced Phase 12+ crates
+(`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`, `porous`,
+`contact`, `fluid`, `coupling`, `modal`, `topopt`) are opt-in features, not
+enabled by default. `use tpt_fem::prelude::*;` pulls in the public API of every
 enabled crate.
 
 ## Quick start

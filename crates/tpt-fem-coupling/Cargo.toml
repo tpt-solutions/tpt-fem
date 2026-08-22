@@ -21,6 +21,8 @@ tpt-fem-dofmap = { workspace = true }
 tpt-fem-dynamic = { workspace = true }
 tpt-fem-mesh = { workspace = true }
 tpt-fem-sparse = { workspace = true }
+tpt-fem-element = { workspace = true }
+tpt-fem-quadrature = { workspace = true }
 
 [features]
 default = []

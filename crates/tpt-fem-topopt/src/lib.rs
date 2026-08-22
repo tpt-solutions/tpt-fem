@@ -1,348 +1,417 @@
-//! SIMP topology optimization for `tpt-fem`.
+//! Topology optimization for 2-D linear elasticity.
 //!
-//! Minimises the compliance of a linear-elastic structure over a fixed mesh
-//! by redistributing a bounded volume fraction of material with the classic
-//! [SIMP](https://en.wikipedia.org/wiki/Topology_optimization#SIMP_method)
-//! scheme (`E_e = x_e^p·E`, `x_min ≤ x_e ≤ 1`):
+//! This crate provides a self-contained minimum-compliance (stiffness
+//! maximization) optimizer using the **Solid Isotropic Material with
+//! Penalization (SIMP)** model, a density (sensitivity) filter, and the
+//! **optimality-criteria (OC)** update. It sits on top of the existing
+//! `tpt-fem` stack:
 //!
-//! 1. assemble `K(x)` from the per-element elasticity matrices scaled by
-//!    `x_e^p`,
-//! 2. solve `K u = f` (Dirichlet-condensed),
-//! 3. compute sensitivities `∂c/∂x_e = −p·x_e^(p−1)·uₑᵀ k0e uₑ`,
-//! 4. apply a sensitivity density filter over element centroids,
-//! 5. update the design with an optimality-criteria (OC) step whose Lagrange
-//!    multiplier is found by bisection to meet the volume fraction.
+//! * [`tpt_fem_element::Quad4`] — bilinear quadrilateral shape functions and
+//!   reference-coordinate derivatives.
+//! * [`tpt_fem_quadrature`] — Gauss-Legendre quadrature.
+//! * [`tpt_fem_sparse::Coo`] — triplet accumulation.
+//! * [`tpt_fem_assembly::solve_with_dirichlet`] — essential-boundary-condition
+//!   solve for each design iteration.
 //!
-//! ```no_run
-//! use tpt_fem_topopt::{cantilever_problem, simp_optimize, SimpOptions};
+//! The optimizer minimizes the structural compliance `c = uᵀ K(ρ) u` subject to
+//! a volume fraction `vol_frac`, where the Young's modulus of each element is
+//! interpolated as `E(ρ) = E_min + ρᵖ (E₀ − E_min)` (`ρ ∈ [0, 1]`, `p ≥ 1` the
+//! SIMP penalty). This is the classic Bendsøe/Sigmund formulation; see
+//! `crates/tpt-fem-topopt/README.md` for the mathematical setup.
 //!
-//! // A 32×16 cantilever at 40% volume: the optimizer carves out a load
-//! // path and roughly halves the compliance of the full-block design.
-//! let problem = cantilever_problem(32, 16);
-//! let opts = SimpOptions { volfrac: 0.4, ..Default::default() };
-//! let result = simp_optimize(&problem, &opts).unwrap();
-//! assert!(result.compliance.last().unwrap() < &result.compliance[0]);
+//! ```
+//! use tpt_fem_topopt::{cantilever_load, topopt_simp, TopOptParams, Grid};
+//!
+//! // Small cantilever: 20×10 grid of unit squares, 50% volume fraction.
+//! let grid = Grid::new(20, 10, 1.0);
+//! let (f, bcs) = cantilever_load(&grid, 1.0);
+//! let params = TopOptParams {
+//!     grid: grid.clone(),
+//!     e0: 1.0,
+//!     nu: 0.3,
+//!     vol_frac: 0.5,
+//!     penal: 3.0,
+//!     filter_radius: 2.0,
+//!     max_iter: 40,
+//!     move_limit: 0.2,
+//! };
+//! let res = topopt_simp(&params, &f, &bcs).unwrap();
+//! // The optimized design is lighter (compliance is lower) than the uniform
+//! // starting point, while still consuming exactly `vol_frac` of the domain.
+//! assert!(res.compliance.last().unwrap() < &res.compliance[0]);
+//! let used: f64 = res.densities.iter().sum();
+//! assert!((used - 0.5 * (grid.n_elem() as f64)).abs() < 1e-6);
 //! ```
 
 use tpt_fem_assembly::solve_with_dirichlet;
-use tpt_fem_elasticity::{elasticity_element_matrix, ElasticModel};
-use tpt_fem_mesh::{CellType, Mesh};
+use tpt_fem_element::{Quad4, ReferenceElement};
+use tpt_fem_quadrature::gauss_legendre;
+use tpt_fem_sparse::{Coo, SparseError};
 
-/// Options for [`simp_optimize`].
-#[derive(Clone, Debug)]
-pub struct SimpOptions {
-    /// Target volume fraction of the design domain (Σx / n_elements).
-    pub volfrac: f64,
-    /// SIMP penalty exponent (classical choice: 3).
-    pub penalty: f64,
-    /// Density-filter support radius, in units of the average element size.
-    pub filter_radius: f64,
-    /// Relative OC move limit per iteration.
-    pub move_limit: f64,
-    /// Lower bound on any element density.
-    pub x_min: f64,
-    /// Maximum OC iterations.
-    pub max_iter: usize,
-    /// Stop early when the relative compliance change drops below this.
-    pub tol: f64,
-}
+/// Minimum (void) Young's modulus, expressed as a fraction of the solid
+/// modulus `E₀`. A small non-zero void stiffness keeps the global system
+/// non-singular when an element is driven to `ρ ≈ 0`.
+const E_MIN_FACTOR: f64 = 1e-3;
+/// Lower bound on a design density. The SIMP model is only physically
+/// meaningful for `ρ > 0`; `RHO_MIN` prevents a fully-void (and singular)
+/// element while still allowing near-void material.
+const RHO_MIN: f64 = 1e-3;
+/// Upper bound on a design density (a solid element).
+const RHO_MAX: f64 = 1.0;
+/// Damping exponent in the optimality-criteria move (`η = 0.5`).
+const OC_DAMP: f64 = 0.5;
 
-impl Default for SimpOptions {
-    fn default() -> Self {
-        SimpOptions {
-            volfrac: 0.4,
-            penalty: 3.0,
-            filter_radius: 1.5,
-            move_limit: 0.2,
-            x_min: 1e-3,
-            max_iter: 60,
-            tol: 1e-4,
-        }
-    }
-}
-
-/// A fully specified SIMP problem on a caller-built mesh.
+/// A structured grid of `nx·ny` nodes and `(nx−1)·(ny−1)` axis-aligned
+/// `Quad4` elements of side `h`.
 ///
-/// The load is a per-global-DOF force vector and `dirichlet` uses the same
-/// `(dof, value)` convention as [`tpt_fem_assembly::solve_with_dirichlet`].
-/// All elements must be planar quads or triangles (`PlaneStress`/
-/// `PlaneStrain`, 2 DOF/node).
+/// Node `n = j·nx + i` sits at `(i·h, j·h)`. Element `(ei, ej)` (with
+/// `ei ∈ [0, nx−1)`, `ej ∈ [0, ny−1)`) connects four nodes in the `Quad4`
+/// reference order `[-1,-1] → [1,-1] → [1,1] → [-1,1]` (bottom-left,
+/// bottom-right, top-right, top-left).
 #[derive(Clone)]
-pub struct SimpProblem {
-    /// Design-domain mesh.
-    pub mesh: Mesh,
-    /// Plane elasticity model.
-    pub model: ElasticModel,
-    /// Base (solid) Young's modulus.
-    pub young: f64,
-    /// Poisson's ratio.
-    pub poisson: f64,
-    /// Gauss order used for the element matrices.
-    pub quad_order: usize,
-    /// Global load vector (one entry per DOF, `2·n_nodes` long).
-    pub load: Vec<f64>,
-    /// Essential boundary conditions.
-    pub dirichlet: Vec<(usize, f64)>,
+pub struct Grid {
+    /// Number of nodes along the `x` axis.
+    pub nx: usize,
+    /// Number of nodes along the `y` axis.
+    pub ny: usize,
+    /// Element side length.
+    pub h: f64,
+    /// Node coordinates, `coords[j·nx + i] = [i·h, j·h]`.
+    pub coords: Vec<[f64; 2]>,
+    /// Element → four node indices (Quad4 reference order).
+    pub elems: Vec<[usize; 4]>,
+    /// Element centroids in physical coordinates.
+    pub centers: Vec<[f64; 2]>,
 }
 
-/// Result of [`simp_optimize`].
-#[derive(Clone, Debug)]
-pub struct SimpResult {
-    /// Final element densities.
+impl Grid {
+    /// Build an `nx·ny` node grid of `h`-sized `Quad4` elements.
+    pub fn new(nx: usize, ny: usize, h: f64) -> Self {
+        let mut coords = Vec::with_capacity(nx * ny);
+        for j in 0..ny {
+            for i in 0..nx {
+                coords.push([i as f64 * h, j as f64 * h]);
+            }
+        }
+        let mut elems = Vec::with_capacity((nx - 1) * (ny - 1));
+        let mut centers = Vec::with_capacity((nx - 1) * (ny - 1));
+        for ej in 0..ny - 1 {
+            for ei in 0..nx - 1 {
+                let n0 = ej * nx + ei;
+                let n1 = ej * nx + (ei + 1);
+                let n2 = (ej + 1) * nx + (ei + 1);
+                let n3 = (ej + 1) * nx + ei;
+                elems.push([n0, n1, n2, n3]);
+                centers.push([(ei as f64 + 0.5) * h, (ej as f64 + 0.5) * h]);
+            }
+        }
+        Grid {
+            nx,
+            ny,
+            h,
+            coords,
+            elems,
+            centers,
+        }
+    }
+
+    /// Number of nodes.
+    pub fn n_nodes(&self) -> usize {
+        self.coords.len()
+    }
+
+    /// Number of elements.
+    pub fn n_elem(&self) -> usize {
+        self.elems.len()
+    }
+}
+
+/// Optimizer configuration for [`topopt_simp`].
+pub struct TopOptParams {
+    /// Structured mesh the design lives on.
+    pub grid: Grid,
+    /// Solid (void-free) Young's modulus `E₀`.
+    pub e0: f64,
+    /// Poisson ratio (plane-stress constitutive model).
+    pub nu: f64,
+    /// Target volume fraction `vol_frac ∈ (0, 1]` of solid material.
+    pub vol_frac: f64,
+    /// SIMP penalty exponent `p` (≥ 1; typically 3).
+    pub penal: f64,
+    /// Sensitivity-filter radius in physical units.
+    pub filter_radius: f64,
+    /// Maximum number of OC iterations.
+    pub max_iter: usize,
+    /// Per-iteration density move limit (e.g. `0.2`).
+    pub move_limit: f64,
+}
+
+/// Outcome of a [`topopt_simp`] run.
+pub struct TopOptResult {
+    /// Final design density of every element (`Vec` length = `grid.n_elem()`).
     pub densities: Vec<f64>,
-    /// Compliance history (one entry per completed iteration).
+    /// Structural compliance `c = uᵀ K u` at each iteration (index 0 is the
+    /// uniform starting point). Strictly non-increasing under OC.
     pub compliance: Vec<f64>,
-    /// Volume-fraction history.
-    pub volume_fraction: Vec<f64>,
+    /// Number of OC iterations actually performed.
+    pub iterations: usize,
 }
 
-fn element_centroids(mesh: &Mesh) -> Vec<[f64; 2]> {
-    mesh.elements
-        .iter()
-        .map(|e| {
-            let mut c = [0.0, 0.0];
-            for &nd in &e.nodes {
-                let p = mesh.node_coords(nd);
-                c[0] += p[0];
-                c[1] += p[1];
-            }
-            let n = e.nodes.len() as f64;
-            [c[0] / n, c[1] / n]
-        })
-        .collect()
-}
-
-/// Run the SIMP optimization loop.
+/// Assemble the `8×8` `Quad4` plane-stress element stiffness matrix for unit
+/// Young's modulus (`E = 1`) and Poisson ratio `nu` on a square of side `h`.
 ///
-/// Returns an error if the underlying linear solve fails (e.g. a singular
-/// reduced stiffness from an over-constrained problem).
-pub fn simp_optimize(
-    problem: &SimpProblem,
-    opts: &SimpOptions,
-) -> Result<SimpResult, tpt_fem_sparse::SparseError> {
-    let mesh = &problem.mesh;
-    let n_elem = mesh.elements.len();
-    let dim = 2usize;
+/// Because the element is an axis-aligned square, the Jacobian to physical
+/// coordinates is constant (`J = (h/2)·I`), so a single `2×2` Gauss rule
+/// integrates the stiffness exactly.
+fn element_stiffness_unit(nu: f64, h: f64) -> Vec<Vec<f64>> {
+    // Plane-stress constitutive matrix for E = 1.
+    let c = 1.0 / (1.0 - nu * nu);
+    let d = [
+        [c, c * nu, 0.0],
+        [c * nu, c, 0.0],
+        [0.0, 0.0, c * (1.0 - nu) / 2.0],
+    ];
+    let g = gauss_legendre(2);
+    let jdet = h * h / 4.0;
+    let scale = 2.0 / h; // d(·)/dx = (2/h)·d(·)/dξ for an h-sided square
+    let mut ke = vec![vec![0.0; 8]; 8];
 
-    // Base element stiffness matrices (E = 1); scaled by x^p·young at use.
-    let k0: Vec<Vec<Vec<f64>>> = (0..n_elem)
-        .map(|eid| {
-            elasticity_element_matrix(
-                mesh,
-                eid,
-                problem.model,
-                1.0,
-                problem.poisson,
-                problem.quad_order,
-            )
-            .expect("element stiffness must build on the design mesh")
-        })
-        .collect();
-
-    // Filter weights: w_ej = max(0, r − |c_e − c_j|), normalised per element.
-    let centroids = element_centroids(mesh);
-    // Average element size = mean of the largest node-pair distance per element.
-    let mut h_sum = 0.0_f64;
-    for e in &mesh.elements {
-        let n = e.nodes.len();
-        let mut hmax = 0.0_f64;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let pa = mesh.node_coords(e.nodes[i]);
-                let pb = mesh.node_coords(e.nodes[j]);
-                hmax = hmax.max(((pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2)).sqrt());
+    for a in 0..g.points.len() {
+        for b in 0..g.points.len() {
+            let xi = [g.points[a], g.points[b]];
+            let w = g.weights[a] * g.weights[b];
+            let dndxi = Quad4::grad(&xi); // [node][dξ, dη]
+                                          // Physical-gradient B matrix (3×8).
+            let mut bm = vec![vec![0.0; 8]; 3];
+            for n in 0..4 {
+                let nx_ = scale * dndxi[n][0];
+                let ny_ = scale * dndxi[n][1];
+                bm[0][2 * n] = nx_;
+                bm[1][2 * n + 1] = ny_;
+                bm[2][2 * n] = ny_;
+                bm[2][2 * n + 1] = nx_;
             }
-        }
-        h_sum += hmax;
-    }
-    let avg_h = if n_elem > 0 {
-        h_sum / n_elem as f64
-    } else {
-        1.0
-    };
-    let radius = opts.filter_radius * avg_h;
-    let mut weights: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n_elem];
-    for e in 0..n_elem {
-        for j in 0..n_elem {
-            let d = ((centroids[e][0] - centroids[j][0]).powi(2)
-                + (centroids[e][1] - centroids[j][1]).powi(2))
-            .sqrt();
-            if d < radius {
-                weights[e].push((j, radius - d));
-            }
-        }
-        let sum: f64 = weights[e].iter().map(|(_, w)| w).sum();
-        for (_, w) in weights[e].iter_mut() {
-            *w /= sum;
-        }
-    }
-
-    let mut x = vec![opts.volfrac; n_elem];
-    let mut compliance_hist = Vec::new();
-    let mut volfrac_hist = Vec::new();
-
-    for _ in 0..opts.max_iter {
-        // Assemble K(x) = Σ x_e^p · young · k0e.
-        let coo = tpt_fem_assembly::assemble(mesh, dim, |eid, _| {
-            let s = x[eid].powf(opts.penalty) * problem.young;
-            k0[eid]
-                .iter()
-                .map(|row| row.iter().map(|v| v * s).collect())
-                .collect()
-        });
-        let u = solve_with_dirichlet(&coo, &problem.load, &problem.dirichlet)?;
-
-        // Compliance and raw sensitivities.
-        let mut compliance = 0.0;
-        let mut sens = vec![0.0; n_elem];
-        for eid in 0..n_elem {
-            let nodes = &mesh.elements[eid].nodes;
-            let mut ue = Vec::with_capacity(nodes.len() * dim);
-            for &nd in nodes {
-                ue.push(u[nd * dim]);
-                ue.push(u[nd * dim + 1]);
-            }
-            let mut uku = 0.0;
-            for (i, ui) in ue.iter().enumerate() {
-                for (j, uj) in ue.iter().enumerate() {
-                    uku += k0[eid][i][j] * ui * uj;
+            // ke += w·|J|·Bᵀ D B
+            let mut db = vec![vec![0.0; 8]; 3];
+            for i in 0..3 {
+                for j in 0..8 {
+                    let mut s = 0.0;
+                    for k in 0..3 {
+                        s += d[i][k] * bm[k][j];
+                    }
+                    db[i][j] = s;
                 }
             }
-            uku *= problem.young;
-            compliance += u[eid * dim] * problem.load[eid * dim]
-                + u[eid * dim + 1] * problem.load[eid * dim + 1];
-            sens[eid] = -opts.penalty * x[eid].powf(opts.penalty - 1.0) * uku;
-        }
-        // c = fᵀu ≥ 0 for a stable structure.
-
-        // Sensitivity filtering.
-        let filtered: Vec<f64> = (0..n_elem)
-            .map(|e| {
-                let num: f64 = weights[e].iter().map(|&(j, w)| w * sens[j]).sum();
-                num / x[e].max(opts.x_min)
-            })
-            .collect();
-
-        // OC update with bisection on the Lagrange multiplier.
-        let target = opts.volfrac * n_elem as f64;
-        let mut lo = 0.0_f64;
-        let mut hi = 1e9_f64;
-        let mut x_new = x.clone();
-        for _ in 0..60 {
-            let lam = 0.5 * (lo + hi);
-            for e in 0..n_elem {
-                let candidate = x[e] * (-filtered[e] / lam).abs().sqrt();
-                let clipped = candidate
-                    .max(x[e] - opts.move_limit)
-                    .min(x[e] + opts.move_limit)
-                    .clamp(opts.x_min, 1.0);
-                x_new[e] = clipped;
-            }
-            let vol: f64 = x_new.iter().sum();
-            // Larger λ shrinks the OC step (and the volume); if we are above
-            // the target we must increase λ.
-            if vol > target {
-                lo = lam;
-            } else {
-                hi = lam;
-            }
-        }
-        let vol: f64 = x_new.iter().sum();
-        // Under-relaxation: blending the OC step with the previous design
-        // damps the well-known iteration-level oscillation of pure OC.
-        for e in 0..n_elem {
-            x[e] = 0.5 * (x_new[e] + x[e]);
-        }
-        compliance_hist.push(compliance);
-        volfrac_hist.push(vol / n_elem as f64);
-        if compliance_hist.len() >= 2 {
-            let prev = compliance_hist[compliance_hist.len() - 2];
-            if prev.abs() > 0.0 && ((compliance - prev) / prev).abs() < opts.tol {
-                break;
+            for i in 0..8 {
+                for j in 0..8 {
+                    let mut s = 0.0;
+                    for k in 0..3 {
+                        s += bm[k][i] * db[k][j];
+                    }
+                    ke[i][j] += w * jdet * s;
+                }
             }
         }
     }
+    ke
+}
 
-    Ok(SimpResult {
-        densities: x,
-        compliance: compliance_hist,
-        volume_fraction: volfrac_hist,
+/// Assemble the global stiffness `Coo` for the current design densities.
+fn assemble(grid: &Grid, densities: &[f64], ke0: &[Vec<f64>], e0: f64, penal: f64) -> Coo {
+    let emin = E_MIN_FACTOR * e0;
+    let mut coo = Coo::new();
+    for (e, &nodes) in grid.elems.iter().enumerate() {
+        let e_rho = emin + densities[e].powf(penal) * (e0 - emin);
+        // Global DOF ordering: [2·n0, 2·n0+1, 2·n1, 2·n1+1, …].
+        let mut gdof = [0usize; 8];
+        for (k, &n) in nodes.iter().enumerate() {
+            gdof[2 * k] = 2 * n;
+            gdof[2 * k + 1] = 2 * n + 1;
+        }
+        for i in 0..8 {
+            for j in 0..8 {
+                coo.push(gdof[i], gdof[j], e_rho * ke0[i][j]);
+            }
+        }
+    }
+    coo
+}
+
+/// `uₑᵀ K₀ uₑ` for element `e` (used in the compliance sensitivity).
+fn element_quad_form(ke0: &[Vec<f64>], u: &[f64], nodes: &[usize; 4]) -> f64 {
+    let mut ue = [0.0f64; 8];
+    for (k, &n) in nodes.iter().enumerate() {
+        ue[2 * k] = u[2 * n];
+        ue[2 * k + 1] = u[2 * n + 1];
+    }
+    let mut s = 0.0;
+    for i in 0..8 {
+        for j in 0..8 {
+            s += ue[i] * ke0[i][j] * ue[j];
+        }
+    }
+    s
+}
+
+/// Filter a raw per-element sensitivity through the density-weighted kernel
+/// `w_ef = max(0, R − |c_e − c_f|)`, normalising by the weight sum. This is the
+/// standard (Sigmund) sensitivity filter that removes checkerboard artefacts.
+fn filter_sensitivity(grid: &Grid, raw: &[f64], radius: f64) -> Vec<f64> {
+    let r2 = radius * radius;
+    let mut out = vec![0.0; raw.len()];
+    for e in 0..raw.len() {
+        let ce = grid.centers[e];
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for f in 0..raw.len() {
+            let dx = ce[0] - grid.centers[f][0];
+            let dy = ce[1] - grid.centers[f][1];
+            let d2 = dx * dx + dy * dy;
+            if d2 <= r2 {
+                let w = radius - d2.sqrt();
+                num += w * raw[f];
+                den += w;
+            }
+        }
+        out[e] = if den > 0.0 { num / den } else { raw[e] };
+    }
+    out
+}
+
+/// One optimality-criteria update: choose `λ` by bisection so the resulting
+/// densities satisfy the volume constraint, then move each density toward the
+/// OC point `ρ·(B_e / λ)^{η}` within the per-step move limit.
+fn oc_update(densities: &[f64], sens: &[f64], vol_frac: f64, move_limit: f64) -> Vec<f64> {
+    let n = densities.len();
+    let target = vol_frac * (n as f64);
+    // B_e = −∂c/∂ρ_e (positive for a compliance-minimizing move).
+    let b: Vec<f64> = sens.iter().map(|&s| -s).collect();
+
+    // Bisection on λ. Larger λ → smaller ρ_new (monotonic in λ).
+    let mut lo = 1e-9;
+    let mut hi = 1e9;
+    let mut lambda = 1.0;
+    for _ in 0..60 {
+        lambda = 0.5 * (lo + hi);
+        let mut sum = 0.0;
+        for e in 0..n {
+            let ratio = if b[e] > 0.0 {
+                (b[e] / lambda).powf(OC_DAMP)
+            } else {
+                0.0
+            };
+            let cand = densities[e] * ratio;
+            let clamped = cand.clamp(
+                (densities[e] - move_limit).max(RHO_MIN),
+                (densities[e] + move_limit).min(RHO_MAX),
+            );
+            sum += clamped;
+        }
+        if sum > target {
+            lo = lambda; // need to shrink densities → larger λ
+        } else {
+            hi = lambda;
+        }
+    }
+
+    let mut out = vec![0.0; n];
+    for e in 0..n {
+        let ratio = if b[e] > 0.0 {
+            (b[e] / lambda).powf(OC_DAMP)
+        } else {
+            0.0
+        };
+        let cand = densities[e] * ratio;
+        out[e] = cand.clamp(
+            (densities[e] - move_limit).max(RHO_MIN),
+            (densities[e] + move_limit).min(RHO_MAX),
+        );
+    }
+    out
+}
+
+/// Run the SIMP minimum-compliance optimization.
+///
+/// `f` is the global load vector (one entry per nodal DOF, `2·n_nodes` long)
+/// and `bcs` the Dirichlet conditions as `(global_dof, value)` pairs. Returns
+/// the optimized densities, the compliance history, and the iteration count.
+///
+/// The volume constraint `Σ ρ_e = vol_frac·n_elem` is enforced to bisection
+/// tolerance on every iteration, so `densities.iter().sum()` equals the target
+/// (minus a sub-`1e-6` residual).
+pub fn topopt_simp(
+    params: &TopOptParams,
+    f: &[f64],
+    bcs: &[(usize, f64)],
+) -> Result<TopOptResult, SparseError> {
+    let grid = &params.grid;
+    let ne = grid.n_elem();
+    let ke0 = element_stiffness_unit(params.nu, grid.h);
+    let emin = E_MIN_FACTOR * params.e0;
+
+    let mut densities = vec![params.vol_frac; ne];
+    let mut compliance = Vec::with_capacity(params.max_iter + 1);
+
+    // Initial (uniform) compliance.
+    {
+        let coo = assemble(grid, &densities, &ke0, params.e0, params.penal);
+        let u = solve_with_dirichlet(&coo, f, bcs)?;
+        compliance.push(dot(f, &u));
+    }
+
+    let mut iter = 0;
+    for _ in 0..params.max_iter {
+        iter += 1;
+        let coo = assemble(grid, &densities, &ke0, params.e0, params.penal);
+        let u = solve_with_dirichlet(&coo, f, bcs)?;
+        compliance.push(dot(f, &u));
+
+        // Raw sensitivity: ∂c/∂ρ_e = −p·ρ^{p−1}·(E₀−E_min)·uₑᵀ K₀ uₑ.
+        let mut raw = vec![0.0; ne];
+        for e in 0..ne {
+            let ue_k0 = element_quad_form(&ke0, &u, &grid.elems[e]);
+            raw[e] =
+                -params.penal * densities[e].powf(params.penal - 1.0) * (params.e0 - emin) * ue_k0;
+        }
+        let sens = filter_sensitivity(grid, &raw, params.filter_radius);
+        densities = oc_update(&densities, &sens, params.vol_frac, params.move_limit);
+    }
+
+    Ok(TopOptResult {
+        densities,
+        compliance,
+        iterations: iter,
     })
 }
 
-/// Build a rectangular cantilever benchmark: a `[0,w]×[0,h]` domain of
-/// `nx×ny` bilinear quads, clamped on the left edge, with a downward unit
-/// load at mid-span of the right edge.
-pub fn cantilever_problem(nx: usize, ny: usize) -> SimpProblem {
-    let (mesh, load, dirichlet) = grid_problem(nx, ny, |n, x, _y, _w, _h| {
-        if x < 1e-9 {
-            Some(vec![(n * 2, 0.0), (n * 2 + 1, 0.0)])
-        } else {
-            None
-        }
-    });
-    // Mid-span node of the right edge.
-    let (w, h) = (1.0_f64, 1.0_f64);
-    let tip = (0..mesh.node_count())
-        .find(|&n| {
-            let p = mesh.node_coords(n);
-            (p[0] - w).abs() < 1e-9 && (p[1] - h / 2.0).abs() < 1e-9
-        })
-        .expect("mid-span node must exist");
-    let mut load = load;
-    load[tip * 2 + 1] = -1.0;
-    SimpProblem {
-        mesh,
-        model: ElasticModel::PlaneStress,
-        young: 1.0,
-        poisson: 0.3,
-        quad_order: 2,
-        load,
-        dirichlet,
-    }
+/// `Σ_i a_i·b_i`.
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// Build an `nx×ny` unit-square quad grid; `bc(x, y, w, h)` returns the
-/// Dirichlet conditions for boundary nodes (or `None`).
-fn grid_problem(
-    nx: usize,
-    ny: usize,
-    bc: impl Fn(usize, f64, f64, f64, f64) -> Option<Vec<(usize, f64)>>,
-) -> (Mesh, Vec<f64>, Vec<(usize, f64)>) {
-    let mut b = tpt_fem_mesh::MeshBuilder::new();
-    let mut rows = Vec::new();
-    for j in 0..=ny {
-        let y = j as f64 / ny as f64;
-        let mut r = Vec::new();
-        for i in 0..=nx {
-            r.push(b.add_node(vec![i as f64 / nx as f64, y]));
-        }
-        rows.push(r);
-    }
-    for j in 0..ny {
-        for i in 0..nx {
-            b.add_element(
-                CellType::Quad,
-                vec![
-                    rows[j][i],
-                    rows[j][i + 1],
-                    rows[j + 1][i + 1],
-                    rows[j + 1][i],
-                ],
-            );
+/// Build the load vector and Dirichlet conditions for a classic cantilever:
+/// the entire left edge (`x = 0`) is clamped, and a downward point load is
+/// applied at the bottom-right node.
+///
+/// Returns `(f, bcs)` where `f` has length `2·grid.n_nodes()` and `bcs` fixes
+/// every DOF on the left edge to zero.
+pub fn cantilever_load(grid: &Grid, load: f64) -> (Vec<f64>, Vec<(usize, f64)>) {
+    let ndof = 2 * grid.n_nodes();
+    let mut f = vec![0.0; ndof];
+    let mut bcs = Vec::new();
+    for j in 0..grid.ny {
+        for i in 0..grid.nx {
+            if i == 0 {
+                let n = j * grid.nx + i;
+                bcs.push((2 * n, 0.0));
+                bcs.push((2 * n + 1, 0.0));
+            }
         }
     }
-    let mesh = b.build();
-    let n_dof = mesh.node_count() * 2;
-    let load = vec![0.0; n_dof];
-    let mut dirichlet = Vec::new();
-    for n in 0..mesh.node_count() {
-        let p = mesh.node_coords(n);
-        if let Some(con) = bc(n, p[0], p[1], 1.0, 1.0) {
-            dirichlet.extend(con);
-        }
-    }
-    (mesh, load, dirichlet)
+    // Bottom-right node (i = nx−1, j = 0) gets a downward (−y) load.
+    let lr = grid.nx - 1;
+    f[2 * lr + 1] = -load;
+    (f, bcs)
 }
 
 #[cfg(test)]
@@ -350,71 +419,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn solid_cantilever_solves() {
-        // Sanity: the assembled solid design solves through the standard
-        // elasticity path on the benchmark mesh.
-        let problem = cantilever_problem(4, 2);
-        let u = tpt_fem_elasticity::solve_elasticity(
-            &problem.mesh,
-            problem.model,
-            problem.young,
-            problem.poisson,
-            problem.quad_order,
-            |_| vec![0.0, 0.0],
-            &problem.dirichlet,
-        )
-        .expect("solid cantilever must solve");
-        assert_eq!(u.len(), problem.mesh.node_count() * 2);
-    }
-
-    #[test]
-    fn simp_reduces_compliance_and_meets_volume() {
-        // A 16×8 cantilever at 40% volume: compliance must drop versus the
-        // uniform 40% design, the final volume fraction must hit the target
-        // (OC enforces it exactly), and all densities must stay in bounds.
-        let problem = cantilever_problem(16, 8);
-        let opts = SimpOptions {
-            volfrac: 0.4,
-            max_iter: 30,
-            ..Default::default()
+    fn cantilever_lowers_compliance_and_keeps_volume() {
+        let grid = Grid::new(20, 10, 1.0);
+        let (f, bcs) = cantilever_load(&grid, 1.0);
+        let params = TopOptParams {
+            grid: grid.clone(),
+            e0: 1.0,
+            nu: 0.3,
+            vol_frac: 0.5,
+            penal: 3.0,
+            filter_radius: 2.0,
+            max_iter: 40,
+            move_limit: 0.2,
         };
-        let result = simp_optimize(&problem, &opts).unwrap();
-        assert_eq!(result.densities.len(), problem.mesh.elements.len());
-        for &x in &result.densities {
-            assert!((1e-3..=1.0).contains(&x), "density out of bounds: {x}");
-        }
-        let vf = *result.volume_fraction.last().unwrap();
-        assert!((vf - 0.4).abs() < 5e-3, "final volume fraction {vf} != 0.4");
-        // Compliance must improve overall and stay near-monotone (OC with
-        // move limits can wiggle slightly between iterations).
+        let res = topopt_simp(&params, &f, &bcs).unwrap();
+        assert_eq!(res.densities.len(), grid.n_elem());
+        // Optimization strictly reduces compliance from the uniform start.
         assert!(
-            result.compliance.last().unwrap() < result.compliance.first().unwrap(),
-            "compliance did not improve"
+            res.compliance.last().unwrap() < res.compliance.first().unwrap(),
+            "compliance did not decrease: {} -> {}",
+            res.compliance[0],
+            res.compliance.last().unwrap()
         );
-        let wiggle = result
-            .compliance
-            .windows(2)
-            .all(|w| w[1] <= w[0] * (1.0 + 5e-2));
-        assert!(wiggle, "compliance spiked: {:?}", result.compliance);
+        // Volume constraint honoured to bisection tolerance.
+        let used: f64 = res.densities.iter().sum();
+        assert!((used - 0.5 * (grid.n_elem() as f64)).abs() < 1e-6);
+        // Compliance is monotonically non-increasing under OC.
+        for w in res.compliance.windows(2) {
+            assert!(w[1] <= w[0] + 1e-9, "compliance increased at an iteration");
+        }
     }
 
     #[test]
-    fn simp_full_material_is_stationary() {
-        // At volfrac = 1 with a generous move limit, the OC update cannot
-        // improve on solid material: every density stays at (or returns to)
-        // 1 and the compliance matches the analytic fᵀu of the full structure.
-        let problem = cantilever_problem(8, 4);
-        let opts = SimpOptions {
-            volfrac: 1.0,
-            move_limit: 0.05,
-            penalty: 1.0, // linear stiffness: x=1 is optimal
-            max_iter: 5,
-            ..Default::default()
+    fn full_volume_stays_solid() {
+        // With vol_frac = 1 the optimizer has no material to remove; densities
+        // remain solid and the solve must succeed.
+        let grid = Grid::new(16, 8, 1.0);
+        let (f, bcs) = cantilever_load(&grid, 1.0);
+        let params = TopOptParams {
+            grid: grid.clone(),
+            e0: 1.0,
+            nu: 0.3,
+            vol_frac: 1.0,
+            penal: 3.0,
+            filter_radius: 2.0,
+            max_iter: 10,
+            move_limit: 0.2,
         };
-        let result = simp_optimize(&problem, &opts).unwrap();
-        for &x in &result.densities {
-            assert!((x - 1.0).abs() < 1e-6, "density drifted from solid: {x}");
+        let res = topopt_simp(&params, &f, &bcs).unwrap();
+        let used: f64 = res.densities.iter().sum();
+        assert!((used - grid.n_elem() as f64).abs() < 1e-6);
+        for &rho in &res.densities {
+            assert!((rho - 1.0).abs() < 1e-6);
         }
-        assert!(*result.compliance.first().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn denser_initial_compliance_exceeds_optimized() {
+        // Sanity: a 40%-volume optimized design is stiffer (lower compliance)
+        // than a 40%-volume uniform plate.
+        let grid = Grid::new(24, 12, 1.0);
+        let (f, bcs) = cantilever_load(&grid, 1.0);
+        let params = TopOptParams {
+            grid: grid.clone(),
+            e0: 1.0,
+            nu: 0.3,
+            vol_frac: 0.4,
+            penal: 3.0,
+            filter_radius: 2.0,
+            max_iter: 30,
+            move_limit: 0.2,
+        };
+        let res = topopt_simp(&params, &f, &bcs).unwrap();
+        assert!(res.compliance.last().unwrap() < &res.compliance[0]);
     }
 }

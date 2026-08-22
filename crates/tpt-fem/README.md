@@ -26,7 +26,23 @@ need:
 | `io-exodus`   | `tpt_fem_io_exodus::*`          | `tpt-fem-io-exodus`   |
 | `mesh-gen`    | `tpt_fem_mesh_gen::*`           | `tpt-fem-mesh-gen`    |
 
-All features are enabled by default. A `prelude` module re-exports the most
+The Phase 12+ advanced crates are opt-in (not enabled by default):
+
+| Feature       | Re-exports                       | Backing crate          |
+|---------------|---------------------------------|-----------------------|
+| `dofmap`      | `tpt_fem_dofmap::*`             | `tpt-fem-dofmap`      |
+| `dynamic`     | `tpt_fem_dynamic::*`            | `tpt-fem-dynamic`     |
+| `plasticity`  | `tpt_fem_plasticity::*`         | `tpt-fem-plasticity`  |
+| `hyperelastic`| `tpt_fem_hyperelastic::*`       | `tpt-fem-hyperelastic`|
+| `composite`   | `tpt_fem_composite::*`          | `tpt-fem-composite`   |
+| `porous`      | `tpt_fem_porous::*`             | `tpt-fem-porous`      |
+| `contact`     | `tpt_fem_contact::*`            | `tpt-fem-contact`     |
+| `fluid`       | `tpt_fem_fluid::*`              | `tpt-fem-fluid`       |
+| `coupling`    | `tpt_fem_coupling::*`           | `tpt-fem-coupling`    |
+| `modal`       | `tpt_fem_modal::*`              | `tpt-fem-modal`       |
+| `topopt`      | `tpt_fem_topopt::*`             | `tpt-fem-topopt`      |
+
+All default features are enabled by default. A `prelude` module re-exports the most
 commonly used items for convenient glob imports.
 
 The end-to-end pipeline — reference-element shape functions and gradients,
