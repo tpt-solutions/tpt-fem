@@ -1023,8 +1023,11 @@ been implemented yet — tracked for a future pass.*
        elimination at assembly time (`u_h = (u_a + u_b)/2`), Q1 Poisson solve,
        Zienkiewicz–Zhu gradient-recovery estimates, and Dörfler bulk marking in
        a `solve_adaptive` identify–mark–refine loop bounded by an element
-       budget.
-       Committed: `amr: quadtree h-refinement with ZZ estimator`.
+       budget. Seeded with a level-2 uniform grid (a single-cell seed makes
+       the ZZ estimate identically zero). Unit tests cover the tree invariants,
+       mesh partition-of-area, MMS convergence, and true-error reduction.
+       Committed: `amr: quadtree h-refinement crate (hanging-node elimination,
+       ZZ estimator, Dörfler marking)`.
 - [x] Topology optimization module (SIMP/level-set) built on the existing
        `tpt-fem-elasticity` + `tpt-fem-solve` stack. **Done (SIMP):** new
        `tpt-fem-topopt` crate — `simp_optimize` with sensitivity density
