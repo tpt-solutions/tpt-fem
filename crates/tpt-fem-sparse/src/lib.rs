@@ -1,4 +1,4 @@
-//! FEM-specific sparse-matrix assembly adapter with a [`tpt-math-linalg-dense`]-backed solve.
+//! FEM-specific sparse-matrix assembly adapter with a `tpt-math-linalg-dense`-backed solve.
 #![allow(clippy::needless_range_loop)]
 //!
 //! Finite-element assembly naturally produces a sparse global matrix as a bag of
@@ -220,7 +220,7 @@ impl Csr {
 /// for the small, hand-built meshes used to validate the crate, but it does
 /// **not** scale to large sparse problems. For those, enable the optional
 /// `russell` feature (which dispatches to the `russell_sparse`
-/// UMFPACK/MUMPS direct solvers) — see [`solve_russell`]. As a rule of thumb,
+/// UMFPACK/MUMPS direct solvers) — see `solve_russell`. As a rule of thumb,
 /// prefer `russell` once `A` has more than a few thousand rows.
 pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
     let sols = solve_multi(coo, std::slice::from_ref(&rhs.to_vec()))?;

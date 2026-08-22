@@ -6,7 +6,7 @@
 //! ```
 //!
 //! `solve_hyperelastic_bar` drives a 4-element bar to a target end stretch with
-//! [`tpt-fem-solve`]'s Newton loop. The free-end displacement and per-element
+//! `tpt-fem-solve`'s Newton loop. The free-end displacement and per-element
 //! stretch are printed and checked against the closed form.
 
 use tpt_fem_hyperelastic::solve_hyperelastic_bar;

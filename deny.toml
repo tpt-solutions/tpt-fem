@@ -18,6 +18,11 @@ ignore = [
     "RUSTSEC-2026-0041",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # `structopt` is flagged as unmaintained; it is reachable only through
+    # `russell_sparse`'s legacy CLI example binary. No safe upgrade exists
+    # upstream (russell_sparse has not migrated to clap), tpt-fem never uses
+    # structopt directly, and it does not affect runtime behavior or safety.
+    { crate = "structopt", reason = "unmaintained transitive dep of russell_sparse; no safe upgrade available" },
 ]
 
 [licenses]

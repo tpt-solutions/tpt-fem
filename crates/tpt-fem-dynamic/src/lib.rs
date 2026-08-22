@@ -14,7 +14,7 @@
 //!   (diagonal) mass for a cheap `M⁻¹`.
 //!
 //! Both reuse the consistent/lumped mass matrices produced by
-//! [`tpt-fem-elasticity`] rather than re-deriving them.
+//! `tpt-fem-elasticity` rather than re-deriving them.
 //!
 //! ```
 //! use tpt_fem_dynamic::{central_difference, newmark, NewmarkOptions};
@@ -405,7 +405,7 @@ impl ModalFrequencyResponse {
     }
 }
 
-/// Frequency-response workflow combining [`tpt-fem-eigen`] modal analysis with
+/// Frequency-response workflow combining `tpt-fem-eigen` modal analysis with
 /// modal superposition — the frequency-domain counterpart of stepping
 /// [`newmark`] to steady state for every excitation frequency at once.
 ///

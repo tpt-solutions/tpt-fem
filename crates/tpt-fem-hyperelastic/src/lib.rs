@@ -4,7 +4,7 @@
 //! incompressible [Neo-Hookean](https://en.wikipedia.org/wiki/Neo-Hookean_solid),
 //! [Mooney–Rivlin](https://en.wikipedia.org/wiki/Mooney%E2%80%93Rivlin_solid),
 //! and [Ogden](https://en.wikipedia.org/wiki/Ogden_(material_model)) strain-energy
-//! functions, plus a 1-D bar solver wired into [`tpt-fem-solve`]'s Newton loop.
+//! functions, plus a 1-D bar solver wired into `tpt-fem-solve`'s Newton loop.
 //!
 //! ```
 //! use tpt_fem_hyperelastic::neo_hookean_piola;
@@ -196,7 +196,7 @@ impl From<tpt_fem_solve::NewtonError> for HyperelasticError {
 }
 
 /// Solve a 1-D bar (built from `Line2` elements, one axial DOF per node) under a
-/// target end stretch using [`tpt-fem-solve`]'s Newton loop with the
+/// target end stretch using `tpt-fem-solve`'s Newton loop with the
 /// incompressible neo-Hookean response. Returns the displacement field whose
 /// rightmost node has been displaced to achieve the prescribed stretch, or a
 /// [`HyperelasticError`] if the Newton iteration fails to converge.

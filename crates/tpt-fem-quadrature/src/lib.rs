@@ -3,7 +3,7 @@
 #![allow(clippy::needless_range_loop)]
 //!
 //! This crate provides exact fixed-order quadrature rules on the standard
-//! reference elements used by [`tpt-fem-element`]:
+//! reference elements used by `tpt-fem-element`:
 //!
 //! * 1-D Gauss–Legendre rules of orders 1–5 on `[-1, 1]` (and on `[0, 1]`),
 //! * tensor-product rules on the square `[-1, 1]²` and cube `[-1, 1]³`,

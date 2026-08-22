@@ -1,7 +1,7 @@
 //! Modal analysis and frequency-response for `tpt-fem`.
 //!
-//! Combines [`tpt-fem-eigen`]'s generalized eigensolver with
-//! [`tpt-fem-dynamic`]'s Newmark integrator to support two standard vibration
+//! Combines `tpt-fem-eigen`'s generalized eigensolver with
+//! `tpt-fem-dynamic`'s Newmark integrator to support two standard vibration
 //! workflows:
 //!
 //! * [`modal_analysis`] + [`ModalData::frequency_response`] — the steady-state
@@ -11,7 +11,7 @@
 //!   vibration qualification and fatigue screening).
 //! * [`ModalData::modal_superposition`] — the *time-domain* complement: the same
 //!   eigenbasis reduces the second-order system to independent single-DOF
-//!   modal equations, each integrated with [`tpt-fem-dynamic`]'s Newmark
+//!   modal equations, each integrated with `tpt-fem-dynamic`'s Newmark
 //!   scheme, then recombined into the physical response `u(t)`.
 //!
 //! ```

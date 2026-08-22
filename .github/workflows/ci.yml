@@ -108,6 +108,13 @@ jobs:
   # github-action-benchmark-style PR dashboard is a future enhancement). Uses
   # default features only — the optional `russell` sparse-direct backend needs
   # the SuiteSparse/MUMPS toolchain and is not built here.
+  #
+  # Criterion's defaults (3 s warm-up + 5 s measurement per benchmark, 100
+  # samples) add up to many minutes across all benchmarks on shared CI runners.
+  # The CLI flags below bound each benchmark to ~2 s total while keeping enough
+  # samples for a usable baseline comparison between runs. The `--bench`
+  # selectors are required: without them `cargo bench` also runs each crate's
+  # unit tests in bench mode, whose libtest harness rejects criterion flags.
   bench:
     runs-on: ubuntu-latest
     steps:
@@ -116,7 +123,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run criterion benchmarks
         run: |
-          cargo bench -p tpt-fem-sparse -p tpt-fem-mesh-gen
+          cargo bench -p tpt-fem-sparse --bench dense_solve \
+            -p tpt-fem-mesh-gen --bench delaunay -- \
+            --warm-up-time 0.5 --measurement-time 1.5 --sample-size 20
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:

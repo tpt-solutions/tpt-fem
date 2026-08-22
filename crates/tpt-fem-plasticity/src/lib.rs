@@ -3,7 +3,7 @@
 //! Provides the radial-return (closest-point projection) algorithm for
 //! associative J2 plasticity with combined isotropic + kinematic hardening,
 //! operating on a single integration point in Voigt `6`-vector form. The
-//! constitutive update is wired into [`tpt-fem-solve`]'s Newton loop by
+//! constitutive update is wired into `tpt-fem-solve`'s Newton loop by
 //! [`solve_elastic_plastic_rod`], a force-controlled 1-D rod solver that
 //! carries per-element plastic state.
 //!
@@ -338,7 +338,7 @@ impl From<tpt_fem_solve::NewtonError> for PlasticityError {
 
 /// Solve a 1-D rod (built from `Line2` elements, one axial DOF per node) under a
 /// sequence of *force* loads `P` applied at the last node, with the first node
-/// fixed. Each load is solved with [`tpt-fem-solve`]'s Newton iteration using a
+/// fixed. Each load is solved with `tpt-fem-solve`'s Newton iteration using a
 /// per-element 1-D J2 (radial-return) plastic state and the consistent tangent.
 /// Returns the displacement vector at each load step, or a [`PlasticityError`]
 /// if the Newton iteration fails to converge (e.g. a perfectly-plastic rod

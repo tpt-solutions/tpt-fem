@@ -3,12 +3,12 @@
 //! This crate ties the core crates together into the standard FEM workflow:
 //!
 //! 1. [`assemble`] scatters per-element matrices (computed by a physics crate
-//!    such as [`tpt-fem-thermal`]) into a global [`Coo`] triplet matrix.
+//!    such as `tpt-fem-thermal`) into a global [`Coo`] triplet matrix.
 //! 2. Natural boundary conditions are added through [`apply_neumann`] (load
 //!    vector) and [`apply_robin`] (stiffness + load contributions).
 //! 3. Essential conditions are enforced by [`solve_with_dirichlet`], which
 //!    statically condenses the fixed degrees of freedom, solves the reduced
-//!    system with [`tpt-fem-sparse`], and scatters the solution back.
+//!    system with `tpt-fem-sparse`, and scatters the solution back.
 //!
 //! All routines are dimension-agnostic across the five linear element types
 //! `Line2`, `Tri3`, `Quad4`, `Tet4`, and `Hex8`, and support an arbitrary
@@ -537,7 +537,7 @@ pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSys
 /// Solve `A u = f` with essential (Dirichlet) conditions.
 ///
 /// Fixed DOFs are condensed out of the system (see [`reduce_system`]), the
-/// reduced system is solved by [`tpt-fem-sparse`], and the prescribed values
+/// reduced system is solved by `tpt-fem-sparse`, and the prescribed values
 /// are scattered back into the solution vector (which has one entry per global
 /// DOF).
 pub fn solve_with_dirichlet(

@@ -5,8 +5,8 @@
 //! * [`electro_thermal`] — Joule heating `q = σ |E|²` fed into the Poisson
 //!   (heat-conduction) operator as a volumetric source.
 //! * [`fsi_coupling`] — a basic partitioned fluid–structure interaction that
-//!   exchanges traction/kinematics between [`tpt-fem-fluid`] and
-//!   [`tpt-fem-elasticity`] through [`tpt-fem-dynamic`].
+//!   exchanges traction/kinematics between `tpt-fem-fluid` and
+//!   `tpt-fem-elasticity` through `tpt-fem-dynamic`.
 //!
 //! ```
 //! use tpt_fem_coupling::thermal_structural;
@@ -406,7 +406,7 @@ pub fn fsi_interface_loads(
 /// and a shared interface of `(structure_node, fluid_node)` pairs, this:
 /// 1. displaces the fluid mesh nodes by the structure displacement (FSI
 ///    kinematic condition),
-/// 2. solves [`tpt-fem-fluid`]'s steady Stokes for the fluid pressure,
+/// 2. solves `tpt-fem-fluid`'s steady Stokes for the fluid pressure,
 /// 3. transfers the fluid pressure as a normal traction onto the structure
 ///    interface (Newton's third law), using a *consistent* (shape-weighted,
 ///    non-lumped) load assembled through the interface elements' quadrature with

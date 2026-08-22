@@ -34,8 +34,12 @@ fn laplacian_2d(n: usize) -> Coo {
 }
 
 fn bench_dense_solve(c: &mut Criterion) {
+    // Cost note: the matrix is `n² × n²`, so a dense LU iteration costs
+    // O(n⁶). Keep the largest grid small enough that one iteration stays in
+    // the seconds range — otherwise a criterion run (which always executes
+    // at least `sample_size` iterations) takes hours instead of minutes.
     let mut group = c.benchmark_group("dense_solve");
-    for &n in &[50usize, 100, 200] {
+    for &n in &[30usize, 40, 50] {
         let coo = laplacian_2d(n);
         let rhs = vec![1.0; n * n];
         group.bench_function(format!("n={n}"), |b| {

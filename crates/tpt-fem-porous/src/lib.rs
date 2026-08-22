@@ -5,7 +5,7 @@
 //! the same isoparametric gradient machinery as the displacement elements:
 //!
 //! * [`solve_darcy`] assembles `K = ∫ k ∇Nᵀ∇N dΩ` (steady-state
-//!   `−∇·(k∇p) = f`) and solves it with [`tpt-fem-sparse`].
+//!   `−∇·(k∇p) = f`) and solves it with `tpt-fem-sparse`.
 //! * [`terzaghi_consolidation`] integrates the 1-D Terzaghi consolidation
 //!   equation `∂u/∂t = cᵥ ∂²u/∂z²` (a diffusion problem) with a stable
 //!   backward-Euler step and recovers the settlement history, checked against

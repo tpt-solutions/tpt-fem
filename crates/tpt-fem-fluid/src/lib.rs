@@ -14,7 +14,7 @@
 //!   *selective reduced integration* — so the equal-order velocity space does
 //!   not lock as the penalty grows.
 //! * [`transient_stokes`] integrates the creeping-flow operator through time
-//!   using [`tpt-fem-dynamic`]'s implicit [`newmark`] scheme.
+//!   using `tpt-fem-dynamic`'s implicit [`newmark`] scheme.
 //! * [`transient_navier_stokes`] adds a Picard-linearised convective term for
 //!   low-Reynolds-number flow.
 //!
@@ -402,7 +402,7 @@ fn assemble_fluid(
 /// incompressibility more strongly at the cost of conditioning. Returns
 /// `(velocity, pressure)` each indexed by node (velocity is `dim` per node,
 /// concatenated as `node*dim + component`; pressure is one scalar per node).
-/// The velocity system is solved with [`tpt-fem-assembly`]'s Dirichlet
+/// The velocity system is solved with `tpt-fem-assembly`'s Dirichlet
 /// reduction; a singular/under-constrained system (e.g. a floating fluid domain
 /// with no velocity Dirichlet condition) is surfaced as [`FluidError::Sparse`]
 /// rather than panicking.
@@ -475,7 +475,7 @@ fn recover_pressure(mesh: &Mesh, sol: &[f64], penalty: f64, dim: usize) -> Vec<f
     p
 }
 
-/// Integrate creeping flow through time with [`tpt-fem-dynamic`]'s implicit
+/// Integrate creeping flow through time with `tpt-fem-dynamic`'s implicit
 /// [`newmark`] scheme. Returns the velocity history `(t, velocity_concat)` for
 /// `0..=nsteps` (velocity concatenated as `node*dim + component`).
 ///
@@ -561,7 +561,7 @@ pub fn transient_stokes(
 ///
 /// The flow starts from rest and `velocity_bc` is held fixed for all steps.
 /// Returns the final velocity field (`node*dim + component`). The backward-Euler
-/// step system is solved with [`tpt-fem-assembly`]'s Dirichlet reduction (a
+/// step system is solved with `tpt-fem-assembly`'s Dirichlet reduction (a
 /// singular/under-constrained system is surfaced as [`FluidError::Sparse`]).
 /// Each step's nonlinear convective term is driven by a Picard fixed-point
 /// iteration that breaks early on convergence; if it does not reach the
