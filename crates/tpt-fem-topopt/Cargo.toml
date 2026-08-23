@@ -9,7 +9,7 @@ description = "SIMP topology optimization (compliance minimisation) built on the
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords = ["finite-element", "fem", "topology-optimization", "simp", "structural"]
+keywords = ["finite-element", "fem", "topology-opt", "simp", "structural"]
 categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
