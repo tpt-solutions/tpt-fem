@@ -17,7 +17,22 @@ __all__ = [
     "ModalSolution",
     "ModeShape",
     "TopOptSolution",
+    "HeatHistory",
     "solve_poisson",
+    "solve_transient_heat",
+    "j2_uniaxial_response",
+    "solve_darcy",
+    "laminate_abd",
+    "solve_thermal_structural",
+    "contact_pairs",
+    "contact_augmented_lagrangian",
+    "fsi_interface_loads",
+    "gpu_enabled",
+    "gpu_adapter",
+    "gpu_solve_cg",
+    "newmark",
+    "solve_stokes",
+    "neo_hookean_uniaxial",
     "solve_elasticity",
     "solve_modal",
     "topopt_cantilever",
@@ -163,6 +178,152 @@ class ModalSolution:
 
     def __iter__(self) -> Any:
         """Iterate over the :class:`ModeShape` objects."""
+
+
+class HeatHistory:
+    """Nodal temperature at every step of :func:`solve_transient_heat`."""
+
+    @property
+    def mesh(self) -> Mesh:
+        """The mesh this history lives on."""
+
+    @property
+    def times(self) -> list[float]:
+        """Time of each stored step (``nsteps + 1`` entries, starting at 0)."""
+
+    def __len__(self) -> int: ...
+    def __getitem__(self, i: int) -> PoissonSolution:
+        """The temperature field at step ``i``."""
+
+    def to_numpy(self) -> Any:
+        """``(nsteps + 1, n_nodes)`` array."""
+
+
+def solve_transient_heat(
+    mesh: Mesh,
+    conductivity: float,
+    rho_c: float,
+    dt: float,
+    nsteps: int,
+    initial: float,
+    bcs: Sequence[tuple[int, float]],
+    source: float = 0.0,
+    theta: float = 1.0,
+    quad_order: int = 2,
+) -> HeatHistory:
+    """Transient heat conduction ``rho_c dT/dt - div(k grad T) = source``."""
+
+
+def solve_thermal_structural(
+    mesh: Mesh,
+    model: str,
+    young: float,
+    poisson: float,
+    alpha: float,
+    delta_t: Sequence[float],
+    bcs: Sequence[tuple[int, int, float]],
+) -> ElasticitySolution:
+    """Free thermal expansion under a per-node temperature rise ``delta_t``."""
+
+
+def gpu_enabled() -> bool:
+    """``True`` if built with GPU support (``--features gpu``)."""
+
+
+def gpu_adapter() -> str:
+    """Name and backend of the GPU adapter, e.g. ``"NVIDIA ... (Vulkan)"``."""
+
+
+def gpu_solve_cg(
+    triplets: Sequence[tuple[int, int, float]],
+    rhs: Sequence[float],
+    tol: float = 1e-10,
+) -> tuple[list[float], int, float]:
+    """GPU Jacobi-PCG for SPD ``A x = b``; returns ``(x, iterations, rel_residual)``."""
+
+
+def fsi_interface_loads(
+    structure: Mesh,
+    interface: Sequence[tuple[int, int]],
+    fluid_pressure: Sequence[float],
+) -> list[float]:
+    """Consistent structure load vector from interface pressures.
+
+    ``interface`` pairs ``(structure_node, fluid_node)``; the result has
+    ``node * dim + component`` ordering."""
+
+
+def contact_augmented_lagrangian(
+    stiffness: Sequence[Sequence[float]],
+    load: Sequence[float],
+    constraints: Sequence[tuple[int, float]],
+    penalty: float = 1e4,
+    max_iter: int = 50,
+    tol: float = 1e-9,
+) -> tuple[list[float], list[float]]:
+    """Solve ``K u = f`` with ``u[dof] >= lower`` constraints; returns ``(u, lambda)``."""
+
+
+def contact_pairs(
+    a: Sequence[tuple[int, Sequence[float]]],
+    b: Sequence[tuple[int, Sequence[float]]],
+) -> list[tuple[int, tuple[int, float] | None]]:
+    """Nearest point of ``b`` for every point of ``a``: ``(a_id, (index_in_b, distance))``
+    or ``(a_id, None)`` if ``b`` is empty. Octree-accelerated."""
+
+
+def laminate_abd(
+    plies: Sequence[tuple[float, float, float, float, float, float]],
+) -> list[list[float]]:
+    """ABD matrix (6x6) from a bottom-to-top stack of
+    ``(e1, e2, nu12, g12, thickness, angle_deg)`` plies."""
+
+
+def newmark(
+    mass: Sequence[Sequence[float]],
+    damping: Sequence[Sequence[float]],
+    stiffness: Sequence[Sequence[float]],
+    u0: Sequence[float],
+    v0: Sequence[float],
+    load: Sequence[float] | Callable[[float], Sequence[float]],
+    dt: float,
+    nsteps: int,
+    beta: float = 0.25,
+    gamma: float = 0.5,
+) -> list[tuple[float, list[float]]]:
+    """Newmark-beta integration of ``M u'' + C u' + K u = f(t)``; returns
+    ``(t, u)`` for steps ``0..=nsteps``."""
+
+
+def solve_darcy(
+    mesh: Mesh, permeability: float, bcs: Sequence[tuple[int, float]]
+) -> PoissonSolution:
+    """Steady Darcy flow ``-div(k grad p) = 0``; returns the nodal pressure."""
+
+
+def solve_stokes(
+    mesh: Mesh,
+    viscosity: float,
+    body_force: Sequence[float],
+    bcs: Sequence[tuple[int, int, float]],
+    penalty: float = 1e6,
+) -> tuple[ElasticitySolution, PoissonSolution]:
+    """Steady Stokes flow (penalty method); returns ``(velocity, pressure)``."""
+
+
+def j2_uniaxial_response(
+    young: float,
+    poisson: float,
+    yield_stress: float,
+    strains: Sequence[float],
+    iso_hardening: float = 0.0,
+    kin_hardening: float = 0.0,
+) -> list[float]:
+    """Axial stress of a J2 elastic-plastic material along a monotonic strain path."""
+
+
+def neo_hookean_uniaxial(mu: float, stretches: Sequence[float]) -> list[float]:
+    """Nominal stress ``mu (l - l**-2)`` of an incompressible neo-Hookean solid."""
 
 
 def solve_poisson(

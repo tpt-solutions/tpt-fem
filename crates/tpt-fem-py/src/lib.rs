@@ -23,14 +23,22 @@
 #![allow(deprecated)]
 
 use ::tpt_fem::{
+    augmented_lagrangian as rs_augmented_lagrangian, contact_pairs as rs_contact_pairs,
+    fsi_interface_loads as rs_fsi_interface_loads, laminate_abd as rs_laminate_abd,
+    newmark as rs_newmark, solve_darcy as rs_solve_darcy, steady_stokes as rs_steady_stokes,
+    thermal_structural as rs_thermal_structural, ContactConstraint, Coo, NewmarkOptions, Ply,
+};
+use ::tpt_fem::{
     box_mesh as rs_box_mesh, cantilever_load, solve_elasticity as rs_solve_elasticity,
-    solve_modal as rs_solve_modal, solve_poisson as rs_solve_poisson, topopt_simp,
-    write_vtk_with_data, CellType, ElasticModel, Grid, Mesh as RsMesh, PointData, TopOptParams,
+    solve_modal as rs_solve_modal, solve_poisson as rs_solve_poisson,
+    solve_transient_heat as rs_solve_transient_heat, topopt_simp, write_vtk_with_data, CellType,
+    ElasticModel, Grid, Mesh as RsMesh, PlasticityParams, PointData, TopOptParams,
+    TransientHeatOptions,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use std::sync::PoisonError;
 use pyo3::types::{PyDict, PyList};
+use std::sync::PoisonError;
 
 #[pyclass]
 struct Mesh {
@@ -181,6 +189,541 @@ fn solve_poisson(
         mesh: mesh.unbind(),
         values,
     })
+}
+
+/// Transient heat conduction `rho_c dT/dt - div(k grad T) = source` by the
+/// theta-method.
+///
+/// * `mesh` — the mesh.
+/// * `conductivity`, `rho_c` — constant `k` and volumetric heat capacity.
+/// * `dt`, `nsteps` — time step and number of steps.
+/// * `initial` — uniform initial temperature.
+/// * `bcs` — list of `(node_id, value)` Dirichlet conditions.
+/// * `source` — constant volumetric source (default `0.0`).
+/// * `theta` — `1.0` backward Euler (default), `0.5` Crank-Nicolson.
+/// * `quad_order` — quadrature order (default `2`).
+///
+/// Returns a [`HeatHistory`] with one nodal field per step `0..=nsteps`.
+#[pyfunction]
+#[pyo3(signature = (mesh, conductivity, rho_c, dt, nsteps, initial, bcs, source=0.0, theta=1.0, quad_order=2))]
+#[allow(clippy::too_many_arguments)]
+fn solve_transient_heat(
+    py: Python<'_>,
+    mesh: Bound<'_, Mesh>,
+    conductivity: f64,
+    rho_c: f64,
+    dt: f64,
+    nsteps: usize,
+    initial: f64,
+    bcs: Vec<(usize, f64)>,
+    source: f64,
+    theta: f64,
+    quad_order: usize,
+) -> PyResult<HeatHistory> {
+    let rs_mesh = mesh.borrow().inner.clone();
+    let opts = TransientHeatOptions {
+        conductivity,
+        rho_c,
+        quad_order,
+        dt,
+        nsteps,
+        theta,
+    };
+    let init = vec![initial; rs_mesh.node_count()];
+    let hist = py
+        .allow_threads(move || {
+            rs_solve_transient_heat(&rs_mesh, &opts, &init, move |_, _| source, &bcs)
+        })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let (times, fields): (Vec<f64>, Vec<Vec<f64>>) = hist.into_iter().unzip();
+    Ok(HeatHistory {
+        mesh: mesh.unbind(),
+        times,
+        fields,
+    })
+}
+
+/// Result of [`solve_transient_heat`]: the nodal temperature at every step.
+#[pyclass]
+struct HeatHistory {
+    mesh: Py<Mesh>,
+    times: Vec<f64>,
+    fields: Vec<Vec<f64>>,
+}
+
+#[pymethods]
+impl HeatHistory {
+    /// The mesh this history lives on.
+    #[getter]
+    fn mesh(&self, py: Python<'_>) -> Py<Mesh> {
+        self.mesh.clone_ref(py)
+    }
+
+    /// Time of each stored step (`nsteps + 1` entries, starting at 0).
+    #[getter]
+    fn times(&self) -> Vec<f64> {
+        self.times.clone()
+    }
+
+    /// Number of stored steps.
+    fn __len__(&self) -> usize {
+        self.fields.len()
+    }
+
+    /// The nodal temperature at step `i` as a `PoissonSolution`-style field.
+    fn __getitem__(&self, py: Python<'_>, i: isize) -> PyResult<PoissonSolution> {
+        let n = self.fields.len() as isize;
+        let idx = if i < 0 { i + n } else { i };
+        if idx < 0 || idx >= n {
+            return Err(pyo3::exceptions::PyIndexError::new_err(
+                "step index out of range",
+            ));
+        }
+        Ok(PoissonSolution {
+            mesh: self.mesh.clone_ref(py),
+            values: self.fields[idx as usize].clone(),
+        })
+    }
+
+    /// The history as an `np.ndarray` of shape `(nsteps + 1, n_nodes)`.
+    fn to_numpy(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let n = self.fields.first().map_or(0, |f| f.len());
+        let flat: Vec<f64> = self.fields.iter().flatten().copied().collect();
+        to_numpy_array(py, &flat, &[self.fields.len(), n])
+    }
+
+    fn __repr__(&self) -> String {
+        let last = self
+            .fields
+            .last()
+            .map(|f| field_stats(f))
+            .unwrap_or((0.0, 0.0, 0.0));
+        format!(
+            "HeatHistory(steps={}, t_end={:.4e}, final min={:.4e}, max={:.4e})",
+            self.fields.len(),
+            self.times.last().copied().unwrap_or(0.0),
+            last.0,
+            last.1
+        )
+    }
+}
+
+/// Uniaxial stress-strain response of a J2 (von Mises) elastic-plastic material
+/// with isotropic and kinematic hardening, for a *monotonic* strain path.
+///
+/// `strains` is the sequence of total axial strains (applied in order, starting
+/// from the virgin state); returns the axial stress after each one. Material
+/// constants: Young's modulus `young`, Poisson's ratio `poisson`, initial yield
+/// stress `yield_stress`, hardening moduli `iso_hardening` / `kin_hardening`.
+/// A material-point driver, useful for calibrating a model against test data.
+#[pyfunction]
+#[pyo3(signature = (young, poisson, yield_stress, strains, iso_hardening=0.0, kin_hardening=0.0))]
+fn j2_uniaxial_response(
+    young: f64,
+    poisson: f64,
+    yield_stress: f64,
+    strains: Vec<f64>,
+    iso_hardening: f64,
+    kin_hardening: f64,
+) -> PyResult<Vec<f64>> {
+    if !(young.is_finite() && young > 0.0) || !(yield_stress.is_finite() && yield_stress > 0.0) {
+        return Err(PyRuntimeError::new_err(
+            "young and yield_stress must be finite and positive",
+        ));
+    }
+    let params = PlasticityParams {
+        young,
+        poisson,
+        yield_stress,
+        iso_hardening,
+        kin_hardening,
+    };
+    let mut eps_eq = 0.0;
+    let mut out = Vec::with_capacity(strains.len());
+    for &eps in &strains {
+        let (sigma, new_eq, _) = ::tpt_fem::plastic_1d(&params, eps, eps_eq);
+        eps_eq = new_eq;
+        out.push(sigma);
+    }
+    Ok(out)
+}
+
+/// Nominal (first Piola-Kirchhoff) stress `P = mu (lambda - lambda^-2)` of an
+/// incompressible neo-Hookean solid in uniaxial extension, for each stretch
+/// `lambda > 0` in `stretches`.
+#[pyfunction]
+fn neo_hookean_uniaxial(mu: f64, stretches: Vec<f64>) -> PyResult<Vec<f64>> {
+    if let Some(bad) = stretches.iter().find(|l| !(l.is_finite() && **l > 0.0)) {
+        return Err(PyRuntimeError::new_err(format!(
+            "stretches must be finite and positive (got {bad})"
+        )));
+    }
+    Ok(stretches
+        .iter()
+        .map(|&l| ::tpt_fem::neo_hookean_1d(l, mu))
+        .collect())
+}
+
+/// Steady Darcy flow `-div(k grad p) = 0` for the pressure field `p`.
+///
+/// * `permeability` — constant `k`.
+/// * `bcs` — list of `(node_id, pressure)` Dirichlet conditions.
+///
+/// Returns a [`PoissonSolution`] holding the nodal pressure.
+#[pyfunction]
+fn solve_darcy(
+    py: Python<'_>,
+    mesh: Bound<'_, Mesh>,
+    permeability: f64,
+    bcs: Vec<(usize, f64)>,
+) -> PyResult<PoissonSolution> {
+    let rs_mesh = mesh.borrow().inner.clone();
+    let values = py
+        .allow_threads(move || rs_solve_darcy(&rs_mesh, permeability, &[], &bcs))
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(PoissonSolution {
+        mesh: mesh.unbind(),
+        values,
+    })
+}
+
+/// Steady Stokes (creeping) flow by the penalty method.
+///
+/// * `viscosity` — dynamic viscosity `mu`.
+/// * `body_force` — constant body-force vector (length = mesh dimension).
+/// * `bcs` — list of `(node_id, component, value)` velocity conditions.
+/// * `penalty` — incompressibility penalty (default `1e6`).
+///
+/// Returns `(velocity, pressure)` as an [`ElasticitySolution`]-style vector
+/// field and a [`PoissonSolution`]-style scalar field.
+#[pyfunction]
+#[pyo3(signature = (mesh, viscosity, body_force, bcs, penalty=1e6))]
+fn solve_stokes(
+    py: Python<'_>,
+    mesh: Bound<'_, Mesh>,
+    viscosity: f64,
+    body_force: Vec<f64>,
+    bcs: Vec<(usize, usize, f64)>,
+    penalty: f64,
+) -> PyResult<(ElasticitySolution, PoissonSolution)> {
+    let dim = dim_of(&mesh.borrow().inner)?;
+    if body_force.len() != dim {
+        return Err(PyRuntimeError::new_err(format!(
+            "body_force must have {dim} components, got {}",
+            body_force.len()
+        )));
+    }
+    let rs_mesh = mesh.borrow().inner.clone();
+    let dir: Vec<(usize, f64)> = bcs.iter().map(|(n, c, v)| (n * dim + c, *v)).collect();
+    let (u, p) = py
+        .allow_threads(move || {
+            rs_steady_stokes(
+                &rs_mesh,
+                viscosity,
+                move |_| body_force.clone(),
+                &dir,
+                penalty,
+            )
+        })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let handle = mesh.unbind();
+    let vel = ElasticitySolution {
+        mesh: handle.clone_ref(py),
+        values: u,
+        dim,
+    };
+    let pres = PoissonSolution {
+        mesh: handle,
+        values: p,
+    };
+    Ok((vel, pres))
+}
+
+/// Thermal-structural coupling: free thermal expansion of an elastic body under
+/// a nodal temperature rise.
+///
+/// * `model`, `young`, `poisson` — as for `solve_elasticity`.
+/// * `alpha` — coefficient of thermal expansion.
+/// * `delta_t` — temperature rise per node (length = node count).
+/// * `bcs` — list of `(node_id, component, value)` displacement conditions.
+///
+/// Returns the displacement field as an [`ElasticitySolution`].
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn solve_thermal_structural(
+    py: Python<'_>,
+    mesh: Bound<'_, Mesh>,
+    model: &str,
+    young: f64,
+    poisson: f64,
+    alpha: f64,
+    delta_t: Vec<f64>,
+    bcs: Vec<(usize, usize, f64)>,
+) -> PyResult<ElasticitySolution> {
+    let model = parse_model(model)?;
+    let dim = dim_of(&mesh.borrow().inner)?;
+    let rs_mesh = mesh.borrow().inner.clone();
+    if delta_t.len() != rs_mesh.node_count() {
+        return Err(PyRuntimeError::new_err(format!(
+            "delta_t has {} entries, mesh has {} nodes",
+            delta_t.len(),
+            rs_mesh.node_count()
+        )));
+    }
+    let dir: Vec<(usize, f64)> = bcs.iter().map(|(n, c, v)| (n * dim + c, *v)).collect();
+    let values = py
+        .allow_threads(move || {
+            rs_thermal_structural(&rs_mesh, model, young, poisson, alpha, &delta_t, &dir)
+        })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(ElasticitySolution {
+        mesh: mesh.unbind(),
+        values,
+        dim,
+    })
+}
+
+/// Work-consistent fluid-structure interface load vector.
+///
+/// * `structure` — the structure mesh (`Tri`/`Quad` in 2-D, `Tet`/`Hex` in 3-D).
+/// * `interface` — list of `(structure_node, fluid_node)` pairs.
+/// * `fluid_pressure` — pressure at every fluid node.
+///
+/// Integrates the traction `p n` over the interface faces of the structure with
+/// outward normals and returns the structure load vector (`node * dim +
+/// component` ordering).
+#[pyfunction]
+fn fsi_interface_loads(
+    structure: Bound<'_, Mesh>,
+    interface: Vec<(usize, usize)>,
+    fluid_pressure: Vec<f64>,
+) -> PyResult<Vec<f64>> {
+    let rs_mesh = structure.borrow().inner.clone();
+    rs_fsi_interface_loads(&rs_mesh, &interface, &fluid_pressure)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// Augmented-Lagrangian unilateral contact on a small dense system.
+///
+/// Solves `K u = f` subject to `u[dof] >= lower` for every `(dof, lower)`
+/// constraint (non-penetration against a rigid obstacle), enforcing the
+/// constraints exactly through multiplier updates. `stiffness` is an `n x n`
+/// nested list, `load` has length `n`. Returns `(u, lambda)`: the displacement
+/// vector and the contact forces (one multiplier per constraint).
+#[pyfunction]
+#[pyo3(signature = (stiffness, load, constraints, penalty=1e4, max_iter=50, tol=1e-9))]
+fn contact_augmented_lagrangian(
+    stiffness: Vec<Vec<f64>>,
+    load: Vec<f64>,
+    constraints: Vec<(usize, f64)>,
+    penalty: f64,
+    max_iter: usize,
+    tol: f64,
+) -> PyResult<(Vec<f64>, Vec<f64>)> {
+    let k = dense_to_coo("stiffness", &stiffness, load.len())?;
+    let cons: Vec<ContactConstraint> = constraints
+        .iter()
+        .map(|&(dof, lower)| ContactConstraint { dof, lower })
+        .collect();
+    rs_augmented_lagrangian(&k, &load, &cons, penalty, max_iter, tol)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// Nearest-node contact pairing between two point sets.
+///
+/// `a` and `b` are lists of `(id, [x, y, z])`. For every point of `a` returns
+/// `(a_id, (b_index, distance))` for its nearest point in `b` (`b_index` is the
+/// position in the list `b`, not its id), or `(a_id, None)` when `b` is empty. Octree-accelerated (`O(|a| log |b|)`).
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn contact_pairs(
+    a: Vec<(usize, Vec<f64>)>,
+    b: Vec<(usize, Vec<f64>)>,
+) -> Vec<(usize, Option<(usize, f64)>)> {
+    rs_contact_pairs(&a, &b)
+}
+
+/// Classical lamination theory: the `6x6` ABD stiffness matrix of a laminate.
+///
+/// `plies` is the bottom-to-top stack of `(e1, e2, nu12, g12, thickness,
+/// angle_deg)` tuples. Returns the row-major `[[A, B], [B, D]]` matrix
+/// relating in-plane force / moment resultants to mid-surface strain /
+/// curvature. A symmetric stack gives `B = 0`.
+#[pyfunction]
+fn laminate_abd(plies: Vec<(f64, f64, f64, f64, f64, f64)>) -> PyResult<Vec<Vec<f64>>> {
+    if plies.is_empty() {
+        return Err(PyRuntimeError::new_err("laminate needs at least one ply"));
+    }
+    let mut stack = Vec::with_capacity(plies.len());
+    for (i, &(e1, e2, nu12, g12, thickness, angle_deg)) in plies.iter().enumerate() {
+        let positive = [e1, e2, g12, thickness]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0);
+        if !positive || !nu12.is_finite() || !angle_deg.is_finite() {
+            return Err(PyRuntimeError::new_err(format!(
+                "ply {i}: e1, e2, g12 and thickness must be finite and positive"
+            )));
+        }
+        stack.push(Ply {
+            e1,
+            e2,
+            nu12,
+            g12,
+            thickness,
+            angle_deg,
+        });
+    }
+    Ok(rs_laminate_abd(&stack).iter().map(|r| r.to_vec()).collect())
+}
+
+fn dense_to_coo(name: &str, m: &[Vec<f64>], n: usize) -> PyResult<Coo> {
+    if m.len() != n || m.iter().any(|r| r.len() != n) {
+        return Err(PyRuntimeError::new_err(format!(
+            "{name} must be a {n}x{n} matrix"
+        )));
+    }
+    let mut c = Coo::new();
+    for (i, row) in m.iter().enumerate() {
+        for (j, &v) in row.iter().enumerate() {
+            if v != 0.0 {
+                c.push(i, j, v);
+            }
+        }
+    }
+    Ok(c)
+}
+
+/// Implicit Newmark-beta time integration of `M u'' + C u' + K u = f(t)` for a
+/// small dense system.
+///
+/// `mass`, `damping`, `stiffness` are `n x n` nested lists; `u0`, `v0` the
+/// initial displacement / velocity (length `n`); `load` is either a constant
+/// force vector or a callable `f(t) -> list[float]`. Returns a list of
+/// `(t, u)` pairs for steps `0..=nsteps`. Defaults `beta=0.25`, `gamma=0.5`
+/// (average acceleration, unconditionally stable).
+#[pyfunction]
+#[pyo3(signature = (mass, damping, stiffness, u0, v0, load, dt, nsteps, beta=0.25, gamma=0.5))]
+#[allow(clippy::too_many_arguments)]
+fn newmark(
+    mass: Vec<Vec<f64>>,
+    damping: Vec<Vec<f64>>,
+    stiffness: Vec<Vec<f64>>,
+    u0: Vec<f64>,
+    v0: Vec<f64>,
+    load: &Bound<'_, PyAny>,
+    dt: f64,
+    nsteps: usize,
+    beta: f64,
+    gamma: f64,
+) -> PyResult<Vec<(f64, Vec<f64>)>> {
+    let n = u0.len();
+    if v0.len() != n {
+        return Err(PyRuntimeError::new_err(
+            "u0 and v0 must have the same length",
+        ));
+    }
+    let m = dense_to_coo("mass", &mass, n)?;
+    let c = dense_to_coo("damping", &damping, n)?;
+    let k = dense_to_coo("stiffness", &stiffness, n)?;
+    let constant = load.extract::<Vec<f64>>().ok();
+    let callback_error: std::cell::RefCell<Option<PyErr>> = std::cell::RefCell::new(None);
+    let f = |t: f64| -> Vec<f64> {
+        if let Some(v) = &constant {
+            return v.clone();
+        }
+        match load.call1((t,)).and_then(|r| r.extract::<Vec<f64>>()) {
+            Ok(v) => v,
+            Err(e) => {
+                *callback_error.borrow_mut() = Some(e);
+                vec![0.0; n]
+            }
+        }
+    };
+    // Guard the callback result length so a short vector can't index-panic.
+    let checked = |t: f64| -> Vec<f64> {
+        let mut v = f(t);
+        v.resize(n, 0.0);
+        v
+    };
+    let opts = NewmarkOptions { dt, beta, gamma };
+    let result = rs_newmark(&m, &c, &k, &u0, &v0, checked, &opts, nsteps)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()));
+    if let Some(e) = callback_error.into_inner() {
+        return Err(e);
+    }
+    result
+}
+
+/// `True` if this build of the extension was compiled with GPU support
+/// (`maturin develop --features gpu`).
+#[pyfunction]
+fn gpu_enabled() -> bool {
+    cfg!(feature = "gpu")
+}
+
+/// Name and backend of the GPU adapter used by `gpu_solve_cg`, e.g.
+/// `"NVIDIA GeForce RTX 3050 (Vulkan)"`. Raises `RuntimeError` when the
+/// extension was built without the `gpu` feature or no adapter exists.
+#[pyfunction]
+fn gpu_adapter() -> PyResult<String> {
+    #[cfg(feature = "gpu")]
+    {
+        let ctx =
+            tpt_fem_gpu::GpuContext::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok(format!("{} ({})", ctx.adapter_name(), ctx.backend()))
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        Err(PyRuntimeError::new_err(
+            "tpt_fem was built without GPU support (rebuild with --features gpu)",
+        ))
+    }
+}
+
+/// Solve the symmetric positive-definite sparse system `A x = b` with
+/// Jacobi-preconditioned conjugate gradients **on the GPU** (single-precision
+/// kernels + double-precision iterative refinement).
+///
+/// * `triplets` — list of `(row, col, value)` entries of `A` (duplicates are
+///   summed).
+/// * `rhs` — right-hand side `b`.
+/// * `tol` — target relative residual `||b - A x|| / ||b||` (default `1e-10`).
+///
+/// Returns `(x, gpu_iterations, relative_residual)`. Far faster than the CPU
+/// solvers beyond roughly 50 000 unknowns. Requires the `gpu` build feature.
+#[pyfunction]
+#[pyo3(signature = (triplets, rhs, tol=1e-10))]
+fn gpu_solve_cg(
+    py: Python<'_>,
+    triplets: Vec<(usize, usize, f64)>,
+    rhs: Vec<f64>,
+    tol: f64,
+) -> PyResult<(Vec<f64>, usize, f64)> {
+    #[cfg(feature = "gpu")]
+    {
+        let mut coo = Coo::new();
+        for (r, c, v) in triplets {
+            coo.push(r, c, v);
+        }
+        let opts = tpt_fem_gpu::GpuCgOptions {
+            tol,
+            ..tpt_fem_gpu::GpuCgOptions::default()
+        };
+        let sol = py
+            .allow_threads(move || {
+                let ctx = tpt_fem_gpu::GpuContext::new()?;
+                tpt_fem_gpu::solve_cg_gpu(&ctx, &coo, &rhs, &opts)
+            })
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok((sol.x, sol.gpu_iterations, sol.relative_residual))
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        let _ = (py, triplets, rhs, tol);
+        Err(PyRuntimeError::new_err(
+            "tpt_fem was built without GPU support (rebuild with --features gpu)",
+        ))
+    }
 }
 
 /// Reference (spatial) dimension of a mesh's first cell.
@@ -869,6 +1412,21 @@ fn tpt_fem(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ModalSolution>()?;
     m.add_class::<ModeShape>()?;
     m.add_class::<TopOptSolution>()?;
+    m.add_class::<HeatHistory>()?;
+    m.add_function(wrap_pyfunction!(solve_transient_heat, py)?)?;
+    m.add_function(wrap_pyfunction!(j2_uniaxial_response, py)?)?;
+    m.add_function(wrap_pyfunction!(solve_darcy, py)?)?;
+    m.add_function(wrap_pyfunction!(laminate_abd, py)?)?;
+    m.add_function(wrap_pyfunction!(solve_thermal_structural, py)?)?;
+    m.add_function(wrap_pyfunction!(contact_pairs, py)?)?;
+    m.add_function(wrap_pyfunction!(contact_augmented_lagrangian, py)?)?;
+    m.add_function(wrap_pyfunction!(fsi_interface_loads, py)?)?;
+    m.add_function(wrap_pyfunction!(gpu_enabled, py)?)?;
+    m.add_function(wrap_pyfunction!(gpu_adapter, py)?)?;
+    m.add_function(wrap_pyfunction!(gpu_solve_cg, py)?)?;
+    m.add_function(wrap_pyfunction!(newmark, py)?)?;
+    m.add_function(wrap_pyfunction!(solve_stokes, py)?)?;
+    m.add_function(wrap_pyfunction!(neo_hookean_uniaxial, py)?)?;
     m.add_function(wrap_pyfunction!(solve_poisson, py)?)?;
     m.add_function(wrap_pyfunction!(solve_elasticity, py)?)?;
     m.add_function(wrap_pyfunction!(solve_modal, py)?)?;

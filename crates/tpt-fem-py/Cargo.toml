@@ -17,8 +17,12 @@ name = "tpt_fem"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tpt-fem = { version = "0.1.0", path = "../tpt-fem", features = ["topopt"] }
+tpt-fem = { version = "0.1.0", path = "../tpt-fem", features = ["topopt", "plasticity", "hyperelastic", "porous", "fluid", "composite", "dynamic", "contact", "coupling"] }
 pyo3 = { version = "0.23", features = ["extension-module"] }
+# Optional GPU acceleration (wgpu); build with `maturin develop --features gpu`.
+tpt-fem-gpu = { version = "0.1.0", path = "../tpt-fem-gpu", optional = true }
 
 [features]
 default = []
+# Exposes `gpu_adapter()` and `gpu_solve_cg(...)` (GPU-resident PCG).
+gpu = ["dep:tpt-fem-gpu"]
