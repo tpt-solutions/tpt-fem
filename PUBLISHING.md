@@ -22,6 +22,7 @@ unreleased. Pre-release code work is tracked in `todo.md` Phase 16.
 |------|----------|-----|
 | `tpt-fem-wasm` (new) | stay unpublished | `publish = false`; browser demo, built with wasm-pack; CI job `wasm-demo` |
 | `tpt-fem-capi` (new) | stay unpublished | `publish = false`; shipped as prebuilt libs + header via `.github/workflows/capi-release.yml` (tag `capi-v*`), which suits a C library better than crates.io |
+| `tpt-fem-gpu` (new) | stay unpublished | `publish = false`; opt-in wgpu acceleration kept out of the core dependency tree; CI job `gpu-crate` (tests skip without an adapter) |
 | `tpt-fem-py` | PyPI only | bump its `tpt-fem` pin to the released version; `maturin publish` workflow already exists |
 | MSRV | **1.85** | the old `rust-version = "1.75"` could not build the dependency tree; now enforced by the CI `msrv` job |
 
@@ -43,7 +44,7 @@ registry matches the repo.
 | Crate | Why | New version |
 |-------|-----|-------------|
 | tpt-fem-quadrature | Keast4 table fix; new `try_gauss_legendre*`, `QuadratureError` (additive) | **0.1.1** |
-| tpt-fem-sparse | new `solve_cg` (additive) | **0.1.1** |
+| tpt-fem-sparse | new `solve_cg`, `solve_skyline`, `solve_banded`, `Csr::is_symmetric` (additive); `solve` auto-uses the sparse Cholesky / banded LU for large systems | **0.1.1** |
 | tpt-fem-eigen | `lanczos_eigs` → `Result` (breaking) + Lanczos fixes | **0.2.0** |
 | tpt-fem-composite | internal `unwrap` removal only | **0.1.1** |
 | tpt-fem-element | `line/quad/hex_rule` → `Result` (breaking) | **0.2.0** |
@@ -157,8 +158,8 @@ cargo publish -p tpt-fem-quadrature     # then follow the table in §3
 
 - CLI / Python exposure of `dynamic`, `plasticity`, `hyperelastic`, `fluid`,
   `porous`, `contact`, `coupling`, `composite` (library-only today).
-- GPU/SIMD assembly; additional export formats beyond CSV/Gmsh (STL, XDMF).
-- A native sparse *direct* solver (the new `solve_cg` covers SPD systems only).
+- GPU assembly and a GPU hook inside the CLI/solvers (the opt-in `tpt-fem-gpu` crate provides GPU matvec and CG); explicit SIMD matvec; HDF5-backed XDMF.
+- General sparse *fill-reducing* direct solves beyond banded structure (the pure-Rust `solve_skyline` / `solve_banded` / `solve_cg` cover SPD and narrow-band systems; wide-band unsymmetric systems still use the dense LU or the `russell` feature).
 
 ---
 

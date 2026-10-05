@@ -1033,7 +1033,12 @@ been implemented yet — tracked for a future pass.*
        `tpt-fem-topopt` crate — `simp_optimize` with sensitivity density
        filtering, optimality-criteria update, and under-relaxation; level-set
        remains a possible future extension.
-- [ ] GPU/SIMD-accelerated element assembly and sparse matvec
+- [ ] GPU/SIMD-accelerated element assembly and sparse matvec (**CPU part done in
+      Phase 16:** multi-threaded assembly via `try_assemble_parallel`; GPU
+      CG/matvec landed as the opt-in `tpt-fem-gpu` crate (wgpu, 3.6x-7.7x vs
+      CPU PCG at 250k-1.4M unknowns on an RTX 3050); also exposed to Python behind the
+      `gpu` feature of `tpt-fem-py`; GPU element assembly and explicit SIMD
+      matvec remain undone)
        (also ties into the "coo_matvec" calling "to_csr()" on every invocation
        performance smell). **CPU half done (2026-08-23):** tpt-fem-sparse gained
        Csr::matvec and tpt-fem-dynamic newmark/central_difference now hoist the
@@ -1272,16 +1277,30 @@ release is a single pass.*
 
 ### 16e — Features / usability
 
+- [x] `tpt-fem-sparse`: also pure-Rust sparse *direct* solvers for general
+      systems (`solve_banded`: RCM + banded LU with partial pivoting).
+- [x] `tpt-fem-sparse`: also a pure-Rust sparse *direct* solver (`solve_skyline`,
+      RCM + envelope Cholesky), auto-used by `solve`/`solve_multi` for large
+      SPD systems.
 - [x] `tpt-fem-sparse`: pure-Rust sparse iterative solver (Jacobi-preconditioned
       CG) so SPD systems scale without SuiteSparse.
 - [ ] CLI/Python exposure for the remaining Phase 12+ crates (`dynamic`,
       `plasticity`, `hyperelastic`, `fluid`, `porous`, `contact`, `coupling`,
-      `composite`) — **not done**: each needs a config schema / binding design,
-      so it is deliberately staged after 0.2.0.
+      `composite`) — **partly done**: transient heat is now exposed as the CLI
+      `heat` subcommand and Python `solve_transient_heat`; J2 plasticity and
+      neo-Hookean material-point drivers are in Python
+      (`j2_uniaxial_response`, `neo_hookean_uniaxial`); `solve_darcy` and
+      `solve_stokes` cover porous/fluid. `laminate_abd` and `newmark` cover
+      composite/dynamic. `solve_thermal_structural` and `contact_pairs`
+      cover coupling/contact plus `contact_augmented_lagrangian`
+      and `fsi_interface_loads` (Python only; the full
+      transient FSI stepping operator remains library-only). Each remaining item needs a
+      config schema / binding design and are staged after 0.2.0.
 - [x] Transient thermal time stepping.
 - [x] Extra export formats: CSV (`Mesh::nodal_csv`) and Gmsh 4.1 writer
       (`Mesh::to_msh_string`), wired into `tpt-fem mesh convert` by extension.
-      STL / XDMF-HDF5 remain unimplemented (no demand yet).
+      STL (boundary surface) and XDMF (embedded-XML data, linear cells) were
+      added later (`to_stl_string`, `to_xdmf_string`); HDF5-backed XDMF is not.
 - [x] Python `.pyi` stubs: no Python-facing API changed in 0.2 (the stubs
       already cover `topopt_cantilever`); nothing to update.
 - [x] C API release artifacts workflow.
