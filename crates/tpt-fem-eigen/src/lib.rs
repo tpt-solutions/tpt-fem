@@ -166,13 +166,16 @@ fn lanczos(coo: &Coo, m: usize) -> (Vec<Vec<f64>>, Vec<f64>, Vec<f64>) {
 }
 
 /// Eigen-decomposition of a dense symmetric matrix by the cyclic Jacobi method.
-/// Returns the eigenvalues and the eigenvectors as columns.
-fn jacobi(mut a: Vec<Vec<f64>>, max_sweeps: usize) -> (Vec<f64>, Vec<Vec<f64>>) {
+/// Returns the eigenvalues, the eigenvectors as columns, and whether all
+/// off-diagonal entries dropped below tolerance within `max_sweeps` (`false`
+/// means the returned values are the best available, not fully converged).
+fn jacobi(mut a: Vec<Vec<f64>>, max_sweeps: usize) -> (Vec<f64>, Vec<Vec<f64>>, bool) {
     let n = a.len();
     let mut v = vec![vec![0.0; n]; n];
     for i in 0..n {
         v[i][i] = 1.0;
     }
+    let mut converged = false;
     for _ in 0..max_sweeps {
         let mut changed = false;
         for p in 0..n {
@@ -209,25 +212,37 @@ fn jacobi(mut a: Vec<Vec<f64>>, max_sweeps: usize) -> (Vec<f64>, Vec<Vec<f64>>) 
             }
         }
         if !changed {
+            converged = true;
             break;
         }
     }
     let eig = (0..n).map(|i| a[i][i]).collect();
-    (eig, v)
+    (eig, v, converged)
 }
 
 /// Compute `num` extreme eigenpairs of a symmetric `Coo` by Lanczos.
 ///
 /// Builds a Lanczos basis of dimension `lanczos_dim`, projects `A` onto the
 /// tridiagonal `T`, and returns the Ritz pairs from a Jacobi eigensolve of `T`.
+///
+/// Returns [`SparseError::Numeric`] if the Krylov subspace collapsed (e.g. due
+/// to an invariant starting subspace or a near-rank-deficient operator) before
+/// `num` Ritz pairs could be extracted, or if the projected Jacobi eigensolve
+/// did not converge within its sweep budget — rather than silently returning
+/// fewer eigenpairs than requested or an unconverged spectrum.
 pub fn lanczos_eigs(
     coo: &Coo,
     num: usize,
     which: EigWhich,
     lanczos_dim: usize,
-) -> Vec<(f64, Vec<f64>)> {
+) -> Result<Vec<(f64, Vec<f64>)>, SparseError> {
     let (basis, alpha, beta) = lanczos(coo, lanczos_dim);
     let m = basis.len();
+    if m < num {
+        return Err(SparseError::Numeric(format!(
+            "lanczos: Krylov subspace collapsed to dimension {m} before {num} eigenpairs could be extracted"
+        )));
+    }
     let mut t = vec![vec![0.0; m]; m];
     for i in 0..m {
         t[i][i] = alpha[i];
@@ -236,7 +251,12 @@ pub fn lanczos_eigs(
         t[i][i + 1] = beta[i];
         t[i + 1][i] = beta[i];
     }
-    let (eig, q) = jacobi(t, 200);
+    let (eig, q, converged) = jacobi(t, 200);
+    if !converged {
+        return Err(SparseError::Numeric(
+            "lanczos: projected Jacobi eigensolve did not converge within max_sweeps".into(),
+        ));
+    }
     let mut idx: Vec<usize> = (0..m).collect();
     idx.sort_by(|&a, &b| {
         eig[a]
@@ -248,7 +268,7 @@ pub fn lanczos_eigs(
         EigWhich::Smallest => take,
         EigWhich::Largest => idx.iter().rev().take(num).cloned().collect(),
     };
-    order
+    Ok(order
         .into_iter()
         .map(|i| {
             let mut vec = vec![0.0; basis[0].len()];
@@ -264,7 +284,7 @@ pub fn lanczos_eigs(
             }
             (eig[i], vec)
         })
-        .collect()
+        .collect())
 }
 
 fn coo_to_dense(coo: &Coo, n: usize) -> Vec<Vec<f64>> {
@@ -508,6 +528,11 @@ pub fn generalized_lanczos_eigs(
 
     let (basis, alpha, beta) = shifted_lanczos(&kprime, sigma, lanczos_dim);
     let mdim = basis.len();
+    if mdim < num {
+        return Err(SparseError::Numeric(format!(
+            "generalized_lanczos_eigs: Krylov subspace collapsed to dimension {mdim} before {num} eigenpairs could be extracted"
+        )));
+    }
     let mut t = vec![vec![0.0; mdim]; mdim];
     for i in 0..mdim {
         t[i][i] = alpha[i];
@@ -516,7 +541,12 @@ pub fn generalized_lanczos_eigs(
         t[i][i + 1] = beta[i];
         t[i + 1][i] = beta[i];
     }
-    let (eig, qmat) = jacobi(t, 200);
+    let (eig, qmat, converged) = jacobi(t, 200);
+    if !converged {
+        return Err(SparseError::Numeric(
+            "generalized_lanczos_eigs: projected Jacobi eigensolve did not converge within max_sweeps".into(),
+        ));
+    }
     // Ritz values μ of (K'-σ)⁻¹ satisfy λ = σ + 1/μ.
     let mut pairs: Vec<(f64, usize)> = (0..mdim)
         .map(|i| {
@@ -604,7 +634,7 @@ mod tests {
                 c.push(i + 1, i, -1.0);
             }
         }
-        let smallest = lanczos_eigs(&c, 1, EigWhich::Smallest, n);
+        let smallest = lanczos_eigs(&c, 1, EigWhich::Smallest, n).unwrap();
         let expected = 2.0 - 2.0 * (std::f64::consts::PI / (n as f64 + 1.0)).cos();
         assert!(
             (smallest[0].0 - expected).abs() < 1e-6,
@@ -612,7 +642,7 @@ mod tests {
             smallest[0].0
         );
 
-        let largest = lanczos_eigs(&c, 1, EigWhich::Largest, n);
+        let largest = lanczos_eigs(&c, 1, EigWhich::Largest, n).unwrap();
         let expected_max = 2.0 - 2.0 * (std::f64::consts::PI * n as f64 / (n as f64 + 1.0)).cos();
         assert!(
             (largest[0].0 - expected_max).abs() < 1e-6,
@@ -805,5 +835,22 @@ mod tests {
                 .sqrt();
             assert!(res < 1e-6, "eigenvector residual {res}");
         }
+    }
+
+    #[test]
+    fn lanczos_eigs_errors_when_krylov_subspace_collapses() {
+        // An n=2 diagonal matrix started from a Krylov basis that requests more
+        // eigenpairs than the operator's rank can supply: `lanczos` breaks out
+        // early once `w` (already orthogonal to the 1-D basis) collapses to
+        // zero, leaving a 1-dimensional basis. Requesting 2 eigenpairs must
+        // error instead of silently returning fewer than requested.
+        let mut c = Coo::new();
+        c.push(0, 0, 5.0);
+        c.push(1, 1, 7.0);
+        // No off-diagonal coupling: v0=[1,0] is already an eigenvector of `A`,
+        // so the Krylov subspace collapses to dimension 1 and a 2-eigenpair
+        // request cannot be satisfied.
+        let err = lanczos_eigs(&c, 2, EigWhich::Smallest, 2).unwrap_err();
+        assert!(matches!(err, SparseError::Numeric(_)), "got {err:?}");
     }
 }

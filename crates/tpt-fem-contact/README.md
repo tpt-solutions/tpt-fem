@@ -65,7 +65,7 @@ use tpt_fem_sparse::Coo;
 let base = Coo { rows: vec![0], cols: vec![0], vals: vec![10.0] };
 let load = vec![-4.0];
 let con = ContactConstraint { dof: 0, lower: 0.0 };
-let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 50, 1e-9);
+let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 50, 1e-9).unwrap();
 assert!(u[0].abs() < 1e-6);
 assert!((lambda[0] - 4.0).abs() < 1e-3);
 ```
@@ -100,7 +100,7 @@ assert!((lambda[0] - 4.0).abs() < 1e-3);
 |------|-------------|
 | `ContactConstraint` | A unilateral `x_dof ≥ lower` constraint on a global DOF. |
 | `penalty_contact` | Augments a base `Coo` with `ε_N` stiffness and `ε_N·lower` load; returns `(Coo, Vec<f64>)`. |
-| `augmented_lagrangian` | ALM iteration returning `(displacements, multipliers)`. |
+| `augmented_lagrangian` | ALM iteration returning `Result<(displacements, multipliers), ContactError>`. |
 | `contact_pairs` | Brute-force nearest-node pairing between two surfaces; returns `(node_a, idx_b, gap)`. |
 
 ## Position in the crate stack

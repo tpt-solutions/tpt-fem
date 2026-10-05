@@ -66,7 +66,7 @@ fn main() {
 
     // Integration measure in action: ∫_Ω 1 dΩ over the physical element equals
     // Σ_q w_q · |det J(q)|, i.e. the parallelogram's area |a × b| = 8.
-    let rule = quad_rule(2);
+    let rule = quad_rule(2).expect("order 2 is valid");
     let mut area = 0.0;
     for (p, w) in rule.points.iter().zip(&rule.weights) {
         let g = Quad4::grad(p);

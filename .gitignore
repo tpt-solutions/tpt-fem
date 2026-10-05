@@ -8,3 +8,7 @@ Thumbs.db
 .idea/
 
 *.log
+
+# Sample output from running the workspace's own examples at the repo root
+# (not fixtures — those live under each crate's tests/ directory).
+/*.vtk

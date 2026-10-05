@@ -13,6 +13,13 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   fail (e.g. an invalid model/dimension combination), propagating the first error
   instead of panicking.
 
+### Changed
+
+- **Breaking:** `apply_neumann_order` / `apply_robin_order` now return
+  `Result<(), SparseError>` instead of panicking when `order` is outside
+  `tpt-fem-quadrature`'s supported `1..=5` range. `apply_neumann` /
+  `apply_robin` (the fixed-order convenience wrappers) are unchanged.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

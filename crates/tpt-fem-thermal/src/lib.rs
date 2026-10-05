@@ -14,22 +14,54 @@
 //!
 //! Scalar fields (one degree of freedom per node) are assumed.
 
-use tpt_fem_assembly::{apply_neumann, apply_robin, assemble, solve_with_dirichlet};
+use tpt_fem_assembly::{apply_neumann, apply_robin, solve_with_dirichlet, try_assemble};
 use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
 };
 use tpt_fem_mesh::{CellType, Mesh};
 use tpt_fem_quadrature::{
-    gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
-    TriangleRule,
+    tensor_cube, tensor_square, tetrahedron, triangle, try_gauss_legendre, QuadratureError,
+    TetrahedronRule, TriangleRule,
 };
 use tpt_fem_sparse::SparseError;
 
+/// Errors returned by this crate's quadrature-dependent element operators.
+#[derive(Debug)]
+pub enum ThermalError {
+    /// The requested Gauss–Legendre `quad_order` is out of range.
+    Quadrature(QuadratureError),
+}
+
+impl std::fmt::Display for ThermalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThermalError::Quadrature(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ThermalError {}
+
+impl From<QuadratureError> for ThermalError {
+    fn from(e: QuadratureError) -> Self {
+        ThermalError::Quadrature(e)
+    }
+}
+
+impl From<ThermalError> for SparseError {
+    fn from(e: ThermalError) -> Self {
+        SparseError::Numeric(e.to_string())
+    }
+}
+
 /// Quadrature points (reference coordinates) and weights for a cell type.
-fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
-    match cell {
+///
+/// Returns [`ThermalError`] if `order` (or, for P2 element types, `order + 1`)
+/// is outside the supported `1..=5` range, rather than panicking.
+fn cell_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), ThermalError> {
+    Ok(match cell {
         CellType::Line => {
-            let r = gauss_legendre(order);
+            let r = try_gauss_legendre(order)?;
             (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
         }
         CellType::Tri => {
@@ -40,7 +72,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Quad => {
-            let r = tensor_square(&gauss_legendre(order));
+            let r = tensor_square(&try_gauss_legendre(order)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
                 r.weights,
@@ -54,7 +86,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Hex => {
-            let r = tensor_cube(&gauss_legendre(order));
+            let r = tensor_cube(&try_gauss_legendre(order)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
                 r.weights,
@@ -68,7 +100,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Quad8 | CellType::Quad9 => {
-            let r = tensor_square(&gauss_legendre(order + 1));
+            let r = tensor_square(&try_gauss_legendre(order + 1)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
                 r.weights,
@@ -82,13 +114,13 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Hex20 | CellType::Hex27 => {
-            let r = tensor_cube(&gauss_legendre(order + 1));
+            let r = tensor_cube(&try_gauss_legendre(order + 1)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
                 r.weights,
             )
         }
-    }
+    })
 }
 
 fn ref_shape(cell: CellType, xi: &[f64]) -> Vec<f64> {
@@ -129,12 +161,15 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 
 /// Element stiffness matrix `K_e` for `-∇·(k ∇u) = f` with constant
 /// conductivity `k`, returned in node order (1 DOF/node).
+///
+/// Returns [`ThermalError`] if `quad_order` is out of range, rather than
+/// panicking.
 pub fn poisson_element_matrix(
     mesh: &Mesh,
     eid: usize,
     conductivity: f64,
     quad_order: usize,
-) -> Vec<Vec<f64>> {
+) -> Result<Vec<Vec<f64>>, ThermalError> {
     let elem = &mesh.elements[eid];
     let phys: Vec<Vec<f64>> = elem
         .nodes
@@ -142,7 +177,7 @@ pub fn poisson_element_matrix(
         .map(|&n| mesh.node_coords(n).to_vec())
         .collect();
     let cell = elem.cell_type;
-    let (qpts, qw) = cell_quad(cell, quad_order);
+    let (qpts, qw) = cell_quad(cell, quad_order)?;
     let n = elem.nodes.len();
     let mut k = vec![vec![0.0; n]; n];
     for (qp, w) in qpts.iter().zip(&qw) {
@@ -156,16 +191,19 @@ pub fn poisson_element_matrix(
             }
         }
     }
-    k
+    Ok(k)
 }
 
 /// Element load vector from a source term `f(x)`, returned in node order.
+///
+/// Returns [`ThermalError`] if `quad_order` is out of range, rather than
+/// panicking.
 pub fn poisson_source_vector(
     mesh: &Mesh,
     eid: usize,
     source: impl Fn(&[f64]) -> f64,
     quad_order: usize,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, ThermalError> {
     let elem = &mesh.elements[eid];
     let phys: Vec<Vec<f64>> = elem
         .nodes
@@ -173,7 +211,7 @@ pub fn poisson_source_vector(
         .map(|&n| mesh.node_coords(n).to_vec())
         .collect();
     let cell = elem.cell_type;
-    let (qpts, qw) = cell_quad(cell, quad_order);
+    let (qpts, qw) = cell_quad(cell, quad_order)?;
     let n = elem.nodes.len();
     let mut f = vec![0.0; n];
     for (qp, w) in qpts.iter().zip(&qw) {
@@ -192,7 +230,7 @@ pub fn poisson_source_vector(
             f[i] += w * s * ns[i] * det;
         }
     }
-    f
+    Ok(f)
 }
 
 /// Solve the steady Poisson/heat-conduction problem.
@@ -216,13 +254,13 @@ where
     S: Fn(&[f64]) -> f64,
 {
     let ndof = mesh.node_count();
-    let mut coo = assemble(mesh, 1, |eid, m| {
+    let mut coo = try_assemble(mesh, 1, |eid, m| {
         poisson_element_matrix(m, eid, conductivity, quad_order)
-    });
+    })?;
 
     let mut rhs = vec![0.0; ndof];
     for eid in 0..mesh.elements.len() {
-        let f = poisson_source_vector(mesh, eid, &source, quad_order);
+        let f = poisson_source_vector(mesh, eid, &source, quad_order)?;
         let elem = &mesh.elements[eid];
         for (i, &node) in elem.nodes.iter().enumerate() {
             rhs[node] += f[i];
@@ -368,5 +406,18 @@ mod tests {
         assert!((u[mid] - 1.0).abs() < 1e-10, "got {}", u[mid]);
         assert!((u[c00] - 0.0).abs() < 1e-12);
         assert!((u[c11] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn quad_order_out_of_range_errors_instead_of_panicking() {
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0]);
+        let n1 = b.add_node(vec![1.0]);
+        b.add_element(CellType::Line, vec![n0, n1]);
+        let mesh = b.build();
+
+        assert!(poisson_element_matrix(&mesh, 0, 1.0, 6).is_err());
+        assert!(poisson_source_vector(&mesh, 0, |_| 1.0, 6).is_err());
+        assert!(solve_poisson(&mesh, 1.0, 6, |_| 1.0, &[(n0, 0.0)], None, None).is_err());
     }
 }

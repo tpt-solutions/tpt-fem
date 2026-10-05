@@ -18,8 +18,8 @@ use tpt_fem_element::{
 };
 use tpt_fem_mesh::{CellType, Mesh};
 use tpt_fem_quadrature::{
-    gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
-    TriangleRule,
+    tensor_cube, tensor_square, tetrahedron, triangle, try_gauss_legendre, QuadratureError,
+    TetrahedronRule, TriangleRule,
 };
 use tpt_fem_sparse::{Coo, SparseError};
 
@@ -32,6 +32,8 @@ pub enum ElasticityError {
     ModelDimMismatch(String),
     /// The underlying linear-algebra solve failed.
     Sparse(SparseError),
+    /// The requested Gauss–Legendre `quad_order` is out of range.
+    Quadrature(QuadratureError),
 }
 
 impl std::fmt::Display for ElasticityError {
@@ -41,6 +43,7 @@ impl std::fmt::Display for ElasticityError {
                 write!(f, "elasticity model/dimension mismatch: {m}")
             }
             ElasticityError::Sparse(e) => write!(f, "elasticity solve failed: {e}"),
+            ElasticityError::Quadrature(e) => write!(f, "{e}"),
         }
     }
 }
@@ -50,6 +53,21 @@ impl std::error::Error for ElasticityError {}
 impl From<SparseError> for ElasticityError {
     fn from(e: SparseError) -> Self {
         ElasticityError::Sparse(e)
+    }
+}
+
+impl From<QuadratureError> for ElasticityError {
+    fn from(e: QuadratureError) -> Self {
+        ElasticityError::Quadrature(e)
+    }
+}
+
+impl From<ElasticityError> for SparseError {
+    fn from(e: ElasticityError) -> Self {
+        match e {
+            ElasticityError::Sparse(s) => s,
+            other => SparseError::Numeric(other.to_string()),
+        }
     }
 }
 
@@ -114,10 +132,13 @@ fn ref_grad(cell: CellType, xi: &[f64]) -> Vec<Vec<f64>> {
     }
 }
 
-fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
-    match cell {
+/// Returns [`ElasticityError::Quadrature`] if `order` (or, for P2 element
+/// types, `order + 1`) is outside the supported `1..=5` range, rather than
+/// panicking.
+fn cell_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), ElasticityError> {
+    Ok(match cell {
         CellType::Line => {
-            let r = gauss_legendre(order);
+            let r = try_gauss_legendre(order)?;
             (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
         }
         CellType::Tri => {
@@ -128,7 +149,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Quad => {
-            let r = tensor_square(&gauss_legendre(order));
+            let r = tensor_square(&try_gauss_legendre(order)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
                 r.weights,
@@ -142,7 +163,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Hex => {
-            let r = tensor_cube(&gauss_legendre(order));
+            let r = tensor_cube(&try_gauss_legendre(order)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
                 r.weights,
@@ -159,7 +180,7 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Quad8 | CellType::Quad9 => {
-            let r = tensor_square(&gauss_legendre(order + 1));
+            let r = tensor_square(&try_gauss_legendre(order + 1)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
                 r.weights,
@@ -173,13 +194,13 @@ fn cell_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Hex20 | CellType::Hex27 => {
-            let r = tensor_cube(&gauss_legendre(order + 1));
+            let r = tensor_cube(&try_gauss_legendre(order + 1)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1], p[2]]).collect(),
                 r.weights,
             )
         }
-    }
+    })
 }
 
 fn strain_dim(dim: usize) -> Result<usize, ElasticityError> {
@@ -278,7 +299,7 @@ pub fn elasticity_element_matrix(
     let n = elem.nodes.len();
     let nstr = strain_dim(dim)?;
     let d = constitutive(model, young, poisson, dim)?;
-    let (qpts, qw) = cell_quad(cell, quad_order);
+    let (qpts, qw) = cell_quad(cell, quad_order)?;
 
     let mut k = vec![vec![0.0; n * dim]; n * dim];
     for (qp, w) in qpts.iter().zip(&qw) {
@@ -309,12 +330,15 @@ pub fn elasticity_element_matrix(
 }
 
 /// Element body-force vector (per node `dim` components) from `b(x)`.
+///
+/// Returns [`ElasticityError::Quadrature`] if `quad_order` is out of range,
+/// rather than panicking.
 pub fn elasticity_body_vector(
     mesh: &Mesh,
     eid: usize,
     body_force: impl Fn(&[f64]) -> Vec<f64>,
     quad_order: usize,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, ElasticityError> {
     let elem = &mesh.elements[eid];
     let phys: Vec<Vec<f64>> = elem
         .nodes
@@ -324,7 +348,7 @@ pub fn elasticity_body_vector(
     let cell = elem.cell_type;
     let dim = ref_dim(cell);
     let n = elem.nodes.len();
-    let (qpts, qw) = cell_quad(cell, quad_order);
+    let (qpts, qw) = cell_quad(cell, quad_order)?;
     let mut f = vec![0.0; n * dim];
     for (qp, w) in qpts.iter().zip(&qw) {
         let ns = ref_shape(cell, qp);
@@ -344,7 +368,7 @@ pub fn elasticity_body_vector(
             }
         }
     }
-    f
+    Ok(f)
 }
 
 /// Solve a linear-elasticity problem.
@@ -369,7 +393,7 @@ pub fn solve_elasticity(
     .map_err(|e| SparseError::Numeric(e.to_string()))?;
     let mut rhs = vec![0.0; ndof];
     for eid in 0..mesh.elements.len() {
-        let f = elasticity_body_vector(mesh, eid, &body_force, quad_order);
+        let f = elasticity_body_vector(mesh, eid, &body_force, quad_order)?;
         let elem = &mesh.elements[eid];
         for (i, &node) in elem.nodes.iter().enumerate() {
             for a in 0..dim {
@@ -383,12 +407,15 @@ pub fn solve_elasticity(
 /// Consistent mass matrix `M = ∫ ρ Nᵀ N dΩ` for an elasticity model, returned as
 /// a [`Coo`] with `dim` DOFs per node. `density` is the mass per reference
 /// volume (or per unit length for [`ElasticModel::BarAxial`]).
+///
+/// Returns [`ElasticityError::Quadrature`] if `quad_order` is out of range,
+/// rather than panicking.
 pub fn elasticity_mass_matrix(
     mesh: &Mesh,
     _model: ElasticModel,
     density: f64,
     quad_order: usize,
-) -> Coo {
+) -> Result<Coo, ElasticityError> {
     let dim = ref_dim(mesh.elements[0].cell_type);
     let mut coo = Coo::new();
     for elem in &mesh.elements {
@@ -399,7 +426,7 @@ pub fn elasticity_mass_matrix(
             .collect();
         let cell = elem.cell_type;
         let n = elem.nodes.len();
-        let (qpts, qw) = cell_quad(cell, quad_order);
+        let (qpts, qw) = cell_quad(cell, quad_order)?;
         // Scalar element mass m_ij = ρ ∫ N_i N_j dΩ.
         let mut m = vec![vec![0.0; n]; n];
         for (qp, w) in qpts.iter().zip(&qw) {
@@ -424,19 +451,22 @@ pub fn elasticity_mass_matrix(
             }
         }
     }
-    coo
+    Ok(coo)
 }
 
 /// Row-sum (lumped) mass matrix, with each node's mass spread equally across its
 /// `dim` DOFs. Convenient for explicit dynamics where a diagonal mass is needed.
+///
+/// Returns [`ElasticityError::Quadrature`] if `quad_order` is out of range,
+/// rather than panicking.
 pub fn elasticity_lumped_mass(
     mesh: &Mesh,
     model: ElasticModel,
     density: f64,
     quad_order: usize,
-) -> Coo {
+) -> Result<Coo, ElasticityError> {
     let dim = ref_dim(mesh.elements[0].cell_type);
-    let consistent = elasticity_mass_matrix(mesh, model, density, quad_order);
+    let consistent = elasticity_mass_matrix(mesh, model, density, quad_order)?;
     let csr = consistent.to_csr();
     let n = csr.nrows;
     let mut coo = Coo::new();
@@ -453,7 +483,7 @@ pub fn elasticity_lumped_mass(
             coo.push(node * dim + a, node * dim + a, lump);
         }
     }
-    coo
+    Ok(coo)
 }
 
 /// Solve the generalized eigenproblem `K Φ = ω² M Φ` (natural vibration modes).
@@ -480,7 +510,7 @@ pub fn solve_modal(
         elasticity_element_matrix(m, eid, model, young, poisson, quad_order)
     })
     .map_err(|e| SparseError::Numeric(e.to_string()))?;
-    let m = elasticity_mass_matrix(mesh, model, density, quad_order);
+    let m = elasticity_mass_matrix(mesh, model, density, quad_order)?;
 
     let red_k = reduce_system(&k, &vec![0.0; ndof], dirichlet);
     let red_m = reduce_system(&m, &vec![0.0; ndof], dirichlet);
@@ -941,5 +971,44 @@ mod tests {
         let err = elasticity_element_matrix(&mesh, 0, ElasticModel::PlaneStress, 1.0, 0.3, 2)
             .expect_err("PlaneStress on a 3-D mesh must error");
         assert!(matches!(err, ElasticityError::ModelDimMismatch(_)));
+    }
+
+    #[test]
+    fn quad_order_out_of_range_errors_instead_of_panicking() {
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0, 0.0]);
+        let n1 = b.add_node(vec![1.0, 0.0]);
+        let n2 = b.add_node(vec![1.0, 1.0]);
+        let n3 = b.add_node(vec![0.0, 1.0]);
+        b.add_element(CellType::Quad, vec![n0, n1, n2, n3]);
+        let mesh = b.build();
+
+        let bad = 6usize;
+        assert!(matches!(
+            elasticity_element_matrix(&mesh, 0, ElasticModel::PlaneStress, 1.0, 0.3, bad),
+            Err(ElasticityError::Quadrature(_))
+        ));
+        assert!(matches!(
+            elasticity_body_vector(&mesh, 0, |_| vec![0.0, 0.0], bad),
+            Err(ElasticityError::Quadrature(_))
+        ));
+        assert!(matches!(
+            elasticity_mass_matrix(&mesh, ElasticModel::PlaneStress, 1.0, bad),
+            Err(ElasticityError::Quadrature(_))
+        ));
+        assert!(matches!(
+            elasticity_lumped_mass(&mesh, ElasticModel::PlaneStress, 1.0, bad),
+            Err(ElasticityError::Quadrature(_))
+        ));
+        assert!(solve_elasticity(
+            &mesh,
+            ElasticModel::PlaneStress,
+            1.0,
+            0.3,
+            bad,
+            |_| vec![0.0, 0.0],
+            &[(0, 0.0), (1, 0.0)],
+        )
+        .is_err());
     }
 }

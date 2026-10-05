@@ -7,6 +7,13 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `line_rule`, `quad_rule`, and `hex_rule` now return
+  `Result<_, ElementError>` instead of panicking when `order` is outside
+  the supported `1..=5` range (they delegate to
+  `tpt-fem-quadrature`'s new `try_gauss_legendre`).
+
 ### Fixed
 
 - `Map::from_nodes_and_grad` now derives the element dimension from the reference

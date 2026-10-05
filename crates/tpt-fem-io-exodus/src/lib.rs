@@ -644,8 +644,17 @@ pub fn bytes_to_mesh(bytes: &[u8]) -> Result<Mesh, ExodusError> {
             .ok_or_else(|| ExodusError::Parse(format!("connect {} has no dims", v.name)))?;
         let npe = dim_size(&dims, last_dim)? as usize;
         let cell = if !eb_names.is_empty() {
-            // Determine block index from variable number.
-            let idx: usize = v.name.trim_start_matches("connect").parse().unwrap_or(1);
+            // Determine block index from variable number. A non-numeric or
+            // otherwise unparseable suffix must be rejected outright, not
+            // defaulted to block 1 — silently doing so would misattribute
+            // this variable's connectivity to `eb_names[0]`'s cell type.
+            let suffix = v.name.trim_start_matches("connect");
+            let idx: usize = suffix.parse().map_err(|_| {
+                ExodusError::Parse(format!(
+                    "connect variable {} has no numeric suffix",
+                    v.name
+                ))
+            })?;
             if idx == 0 {
                 return Err(ExodusError::Parse(format!(
                     "connect variable {} has no numeric suffix",
@@ -874,5 +883,68 @@ mod tests {
             let err = bytes_to_mesh(&bytes).unwrap_err();
             assert!(matches!(err, ExodusError::Parse(_)));
         }
+    }
+
+    #[test]
+    fn rejects_connect_variable_with_non_numeric_suffix() {
+        // A `connect*` variable whose suffix does not parse as a number (here,
+        // literally named "connect" with no suffix at all) must be rejected
+        // outright when `eb_names` is present, not silently defaulted to
+        // block 1's cell type: with the old `.unwrap_or(1)` fallback this
+        // file would have been accepted and misattributed to "TRI3" (whose
+        // node count happens to match), corrupting the connectivity/cell-type
+        // association with no error at all.
+        let dims = vec![
+            NcDim {
+                name: "num_nodes".into(),
+                size: 3,
+            },
+            NcDim {
+                name: "num_dim".into(),
+                size: 3,
+            },
+            NcDim {
+                name: "len_name".into(),
+                size: LEN_NAME,
+            },
+            NcDim {
+                name: "eb0_n".into(),
+                size: 1,
+            },
+            NcDim {
+                name: "eb0_np".into(),
+                size: 3,
+            },
+            NcDim {
+                name: "num_elem_blk".into(),
+                size: 1,
+            },
+        ];
+        let vars = vec![
+            NcVar {
+                name: "coords".into(),
+                dtype: NC_FLOAT,
+                dim_ids: vec![0, 1],
+                data: encode_floats(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+            },
+            NcVar {
+                name: "eb_names".into(),
+                dtype: NC_CHAR,
+                dim_ids: vec![2, 5],
+                data: encode_chars(&["TRI3".to_string()], 1),
+            },
+            NcVar {
+                name: "connect".into(), // no numeric suffix
+                dtype: NC_INT,
+                dim_ids: vec![3, 4],
+                data: encode_ints(&[1, 2, 3]),
+            },
+        ];
+        let bytes = encode_nc3(&dims, &vars).unwrap();
+        let err = bytes_to_mesh(&bytes).unwrap_err();
+        assert!(
+            matches!(err, ExodusError::Parse(ref m) if m.contains("numeric suffix")),
+            "got {err:?}"
+        );
     }
 }

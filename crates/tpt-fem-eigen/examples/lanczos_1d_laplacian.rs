@@ -14,7 +14,7 @@ fn main() {
     }
 
     // Closed-form smallest eigenvalue: 2 - 2 cos(π/(n+1)).
-    let smallest = lanczos_eigs(&c, 1, EigWhich::Smallest, n);
+    let smallest = lanczos_eigs(&c, 1, EigWhich::Smallest, n).expect("lanczos_eigs should converge");
     let expected = 2.0 - 2.0 * (std::f64::consts::PI / (n as f64 + 1.0)).cos();
     assert!(
         (smallest[0].0 - expected).abs() < 1e-6,

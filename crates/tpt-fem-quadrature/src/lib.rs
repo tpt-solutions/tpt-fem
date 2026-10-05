@@ -1,6 +1,5 @@
 //! Gauss quadrature rules for finite-element reference elements.
 #![allow(clippy::excessive_precision)]
-#![allow(clippy::needless_range_loop)]
 //!
 //! This crate provides exact fixed-order quadrature rules on the standard
 //! reference elements used by `tpt-fem-element`:
@@ -27,6 +26,33 @@
 //!     .sum();
 //! assert!((approx - 0.0).abs() < 1e-12);
 //! ```
+
+/// Errors returned by the fallible (`try_*`) quadrature-rule constructors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuadratureError {
+    /// A Gauss–Legendre order was requested outside the supported range.
+    OrderOutOfRange {
+        /// The order that was requested.
+        order: usize,
+        /// The smallest supported order (always `1`).
+        min: usize,
+        /// The largest supported order (always `5`).
+        max: usize,
+    },
+}
+
+impl std::fmt::Display for QuadratureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QuadratureError::OrderOutOfRange { order, min, max } => write!(
+                f,
+                "gauss_legendre: order must be in {min}..={max}, got {order}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QuadratureError {}
 
 /// A 1-D quadrature rule: evaluation points and matching weights.
 #[derive(Clone, Debug, PartialEq)]
@@ -176,6 +202,33 @@ pub fn gauss_legendre_unit(order: usize) -> Quad1D {
     }
 }
 
+/// Fallible version of [`gauss_legendre`]: returns [`QuadratureError`] instead
+/// of panicking when `order` is outside `1..=5`.
+///
+/// Prefer this over [`gauss_legendre`] whenever `order` is not a fixed,
+/// known-valid literal — e.g. whenever it is a parameter a caller of *your*
+/// public API controls.
+pub fn try_gauss_legendre(order: usize) -> Result<Quad1D, QuadratureError> {
+    if !(1..=5).contains(&order) {
+        return Err(QuadratureError::OrderOutOfRange {
+            order,
+            min: 1,
+            max: 5,
+        });
+    }
+    Ok(gauss_legendre(order))
+}
+
+/// Fallible version of [`gauss_legendre_unit`]: returns [`QuadratureError`]
+/// instead of panicking when `order` is outside `1..=5`.
+pub fn try_gauss_legendre_unit(order: usize) -> Result<Quad1D, QuadratureError> {
+    let r = try_gauss_legendre(order)?;
+    Ok(Quad1D {
+        points: r.points.iter().map(|x| (x + 1.0) * 0.5).collect(),
+        weights: r.weights.iter().map(|w| w * 0.5).collect(),
+    })
+}
+
 /// Tensor-product quadrature on the square `[-1, 1]²` from a 1-D rule.
 pub fn tensor_square(rule: &Quad1D) -> Quad2D {
     let n = rule.points.len();
@@ -301,78 +354,41 @@ pub fn tetrahedron(rule: TetrahedronRule) -> Quad3D {
                 &[w_c, w_o, w_o, w_o, w_o],
             )
         }
-        TetrahedronRule::Keast4 => (
-            &[
-                [
-                    3.4755987341592781e-01,
-                    8.9833494257077623e-02,
-                    2.7444361775607534e-02,
+        // Keast's degree-4, 11-point rule (three symmetric orbits: the
+        // centroid, an (A,B,B,B)-type 4-point orbit, and an (A,A,B,B)-type
+        // 6-point orbit). Re-derived from Burkardt's public-domain reference
+        // implementation of Keast (1986) after the previously shipped table
+        // was found to place several points outside the reference tetrahedron
+        // (barycentric coordinates summing to as much as 1.2607) — evaluating
+        // shape functions there is undefined and silently corrupts any
+        // integral that uses this rule. See CHANGELOG for details.
+        TetrahedronRule::Keast4 => {
+            let a4 = 11.0 / 14.0;
+            let b4 = 1.0 / 14.0;
+            let a6 = 0.3994035761667992;
+            let b6 = 0.1005964238332008;
+            let w_centroid = -0.0131555555555555556;
+            let w4 = 0.00762222222222222222;
+            let w6 = 0.0248888888888888889;
+            (
+                &[
+                    [0.25, 0.25, 0.25],
+                    [a4, b4, b4],
+                    [b4, b4, b4],
+                    [b4, b4, a4],
+                    [b4, a4, b4],
+                    [b6, a6, a6],
+                    [a6, b6, a6],
+                    [a6, a6, b6],
+                    [a6, b6, b6],
+                    [b6, a6, b6],
+                    [b6, b6, a6],
                 ],
-                [
-                    5.6324396794297564e-02,
-                    1.0824401145734477e-01,
-                    1.8455109205301029e-01,
+                &[
+                    w_centroid, w4, w4, w4, w4, w6, w6, w6, w6, w6, w6,
                 ],
-                [
-                    2.1308877184004529e-01,
-                    2.7235826324187240e-01,
-                    3.1429349534962059e-01,
-                ],
-                [
-                    3.9737822358754359e-02,
-                    1.0367439369541243e-01,
-                    7.0201200748180603e-01,
-                ],
-                [
-                    7.4704100235526549e-01,
-                    3.4504439235972663e-02,
-                    1.1583086727771186e-01,
-                ],
-                [
-                    3.6107462289211784e-01,
-                    1.9351669025520701e-01,
-                    7.0607393788550299e-01,
-                ],
-                [
-                    5.7831079909913763e-02,
-                    5.0453520347486192e-01,
-                    3.2171662411990731e-01,
-                ],
-                [
-                    3.2121308072437715e-01,
-                    4.4103399120113559e-02,
-                    4.2394778054055604e-01,
-                ],
-                [
-                    4.8682903810900369e-01,
-                    3.0856376319184292e-01,
-                    9.6688241005899650e-02,
-                ],
-                [
-                    9.1155031509020074e-02,
-                    4.9741562468248268e-01,
-                    3.6520406819370660e-02,
-                ],
-                [
-                    1.3824099494800238e-01,
-                    7.8071364095426199e-01,
-                    5.5402341306998303e-02,
-                ],
-            ],
-            &[
-                1.3369217678467679e-02,
-                1.8226860983725623e-02,
-                2.7290508173583462e-02,
-                1.2871564902353203e-02,
-                9.2296479881365471e-03,
-                1.8129933227631694e-03,
-                1.6616322747826342e-02,
-                2.2159660825794909e-02,
-                2.4310916171224342e-02,
-                1.4220267110531069e-02,
-                6.5587066189644319e-03,
-            ],
-        ),
+            )
+        }
     };
     Quad3D {
         points: pts.to_vec(),
@@ -449,6 +465,40 @@ mod tests {
         assert!((r.weight_sum() - 1.0).abs() < 1e-12);
         // int_0^1 x^5 dx = 1/6, order 3 is exact up to degree 5.
         assert!((approx_1d(&r, 5) - 1.0 / 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn try_gauss_legendre_matches_the_panicking_version_in_range() {
+        for order in 1..=5 {
+            assert_eq!(try_gauss_legendre(order).unwrap(), gauss_legendre(order));
+            assert_eq!(
+                try_gauss_legendre_unit(order).unwrap(),
+                gauss_legendre_unit(order)
+            );
+        }
+    }
+
+    #[test]
+    fn try_gauss_legendre_errors_instead_of_panicking_out_of_range() {
+        let err = try_gauss_legendre(0).unwrap_err();
+        assert_eq!(
+            err,
+            QuadratureError::OrderOutOfRange {
+                order: 0,
+                min: 1,
+                max: 5
+            }
+        );
+        let err = try_gauss_legendre(6).unwrap_err();
+        assert_eq!(
+            err,
+            QuadratureError::OrderOutOfRange {
+                order: 6,
+                min: 1,
+                max: 5
+            }
+        );
+        assert!(try_gauss_legendre_unit(6).is_err());
     }
 
     #[test]
@@ -570,6 +620,54 @@ mod tests {
                         "keast4 x^{i} y^{j} z^{k}"
                     );
                 }
+            }
+        }
+    }
+
+    // Regression guard for the bug fixed in `TetrahedronRule::Keast4`: the
+    // previously shipped table integrated monomials correctly (the moment
+    // conditions a quadrature rule must satisfy are a purely algebraic
+    // property of the points/weights and don't require the points to lie
+    // anywhere in particular) while several of its points sat *outside* the
+    // reference tetrahedron — a point with negative barycentric coordinates
+    // or one summing to more than 1. Evaluating a shape function there is
+    // undefined, so exactness tests alone can't catch this class of bug;
+    // every rule's points must also lie within their reference element.
+    #[test]
+    fn every_rule_stays_inside_its_reference_element() {
+        for order in 1..=5 {
+            for p in gauss_legendre(order).points {
+                assert!((-1.0..=1.0).contains(&p), "gauss_legendre({order}) point {p}");
+            }
+            for p in gauss_legendre_unit(order).points {
+                assert!(
+                    (0.0..=1.0).contains(&p),
+                    "gauss_legendre_unit({order}) point {p}"
+                );
+            }
+        }
+        for rule in [TriangleRule::Degree1, TriangleRule::Degree2, TriangleRule::HammerStroud] {
+            for p in triangle(rule).points {
+                assert!(
+                    p[0] >= -1e-12 && p[1] >= -1e-12 && p[0] + p[1] <= 1.0 + 1e-12,
+                    "triangle {rule:?} point {p:?} lies outside the reference triangle"
+                );
+            }
+        }
+        for rule in [
+            TetrahedronRule::Degree1,
+            TetrahedronRule::Degree2,
+            TetrahedronRule::Keast3,
+            TetrahedronRule::Keast4,
+        ] {
+            for p in tetrahedron(rule).points {
+                assert!(
+                    p[0] >= -1e-12
+                        && p[1] >= -1e-12
+                        && p[2] >= -1e-12
+                        && p[0] + p[1] + p[2] <= 1.0 + 1e-12,
+                    "tetrahedron {rule:?} point {p:?} lies outside the reference tetrahedron"
+                );
             }
         }
     }

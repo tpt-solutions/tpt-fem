@@ -52,6 +52,11 @@ pub enum CouplingError {
     Elasticity(ElasticityError),
     /// The fluid (steady-Stokes) solve within the coupling failed.
     Fluid(tpt_fem_fluid::FluidError),
+    /// The mesh or interface mapping passed to a coupling operator was
+    /// malformed: an unsupported cell type, or an interface pairing that
+    /// does not cover every structure node it claims to (e.g. a partial or
+    /// asymmetric `interface` list).
+    Interface(String),
 }
 
 impl std::fmt::Display for CouplingError {
@@ -60,6 +65,7 @@ impl std::fmt::Display for CouplingError {
             CouplingError::Sparse(e) => write!(f, "coupling structure solve failed: {e}"),
             CouplingError::Elasticity(e) => write!(f, "coupling elasticity operator failed: {e}"),
             CouplingError::Fluid(e) => write!(f, "coupling fluid solve failed: {e}"),
+            CouplingError::Interface(m) => write!(f, "coupling interface error: {m}"),
         }
     }
 }
@@ -107,7 +113,11 @@ pub fn thermal_structural(
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
-        other => panic!("coupling: unsupported cell {other:?}"),
+        other => {
+            return Err(tpt_fem_sparse::SparseError::Numeric(format!(
+                "thermal_structural: unsupported cell {other:?}"
+            )))
+        }
     };
     let ndof = mesh.node_count() * dim;
     let k_full = try_assemble(mesh, dim, |eid, m| {
@@ -189,32 +199,44 @@ pub fn electro_thermal(
 /// Isolated interface nodes that belong to no interface face (single-node
 /// coupling) fall back to a lumped load `p·n̂` with the same geometry-aware
 /// outward normal.
+///
+/// Returns [`CouplingError::Interface`] if `struct_mesh` contains an
+/// unsupported cell type, or if an interface face is found whose nodes are
+/// all reported as being on the interface by `s_to_f` but one of them is
+/// missing when looked up a second time (a partial/inconsistent `interface`
+/// list) — rather than panicking.
 pub fn fsi_interface_loads(
     struct_mesh: &Mesh,
     interface: &[(usize, usize)],
     fluid_pressure: &[f64],
-) -> Vec<f64> {
+) -> Result<Vec<f64>, CouplingError> {
     let dim = match struct_mesh.elements[0].cell_type {
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
-        other => panic!("fsi_interface_loads: unsupported cell {other:?}"),
+        other => {
+            return Err(CouplingError::Interface(format!(
+                "fsi_interface_loads: unsupported cell {other:?}"
+            )))
+        }
     };
     let mut s_to_f: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for &(s, f) in interface {
         s_to_f.insert(s, f);
     }
-    let press = |s_node: usize| -> f64 {
-        let f = s_to_f.get(&s_node).copied().unwrap_or_else(|| {
-            panic!("fsi_interface_loads: structure node {s_node} not on the interface")
-        });
-        fluid_pressure[f]
+    let press = |s_node: usize| -> Result<f64, CouplingError> {
+        let f = s_to_f.get(&s_node).copied().ok_or_else(|| {
+            CouplingError::Interface(format!(
+                "fsi_interface_loads: structure node {s_node} not on the interface"
+            ))
+        })?;
+        Ok(fluid_pressure[f])
     };
     let coords = |n: usize| -> Vec<f64> { struct_mesh.node_coords(n).to_vec() };
     let mut loads = vec![0.0; struct_mesh.node_count() * dim];
 
     // Boundary faces of the mesh: a face occurring in exactly one element.
-    let element_faces = |cell: CellType, nodes: &[usize]| -> Vec<Vec<usize>> {
-        match cell {
+    let element_faces = |cell: CellType, nodes: &[usize]| -> Result<Vec<Vec<usize>>, CouplingError> {
+        Ok(match cell {
             CellType::Tri => vec![
                 vec![nodes[0], nodes[1]],
                 vec![nodes[1], nodes[2]],
@@ -240,15 +262,19 @@ pub fn fsi_interface_loads(
                 vec![nodes[2], nodes[3], nodes[7], nodes[6]],
                 vec![nodes[3], nodes[0], nodes[4], nodes[7]],
             ],
-            other => panic!("fsi_interface_loads: unsupported cell {other:?}"),
-        }
+            other => {
+                return Err(CouplingError::Interface(format!(
+                    "fsi_interface_loads: unsupported cell {other:?}"
+                )))
+            }
+        })
     };
     let mut face_count: std::collections::HashMap<Vec<usize>, usize> =
         std::collections::HashMap::new();
     let mut elem_of_face: std::collections::HashMap<Vec<usize>, usize> =
         std::collections::HashMap::new();
     for (eid, elem) in struct_mesh.elements.iter().enumerate() {
-        for face in element_faces(elem.cell_type, &elem.nodes) {
+        for face in element_faces(elem.cell_type, &elem.nodes)? {
             let mut key = face.clone();
             key.sort_unstable();
             *face_count.entry(key.clone()).or_insert(0) += 1;
@@ -287,20 +313,25 @@ pub fn fsi_interface_loads(
         }
     };
     // Consistent load of one linear triangle: f_i = n̂ A (2p_i + p_j + p_k)/12.
-    let add_tri = |loads: &mut Vec<f64>, tri: &[usize], n_hat: &[f64], area: f64| {
-        let p: Vec<f64> = tri.iter().map(|&n| press(n)).collect();
+    let add_tri = |loads: &mut Vec<f64>,
+                   tri: &[usize],
+                   n_hat: &[f64],
+                   area: f64|
+     -> Result<(), CouplingError> {
+        let p: Vec<f64> = tri.iter().map(|&n| press(n)).collect::<Result<_, _>>()?;
         for i in 0..3 {
             let w = area * (2.0 * p[i] + p[(i + 1) % 3] + p[(i + 2) % 3]) / 12.0;
             for a in 0..dim {
                 loads[tri[i] * dim + a] += n_hat[a] * w;
             }
         }
+        Ok(())
     };
 
     let mut covered = vec![false; struct_mesh.node_count()];
     let mut seen: std::collections::HashSet<Vec<usize>> = std::collections::HashSet::new();
     for (eid, elem) in struct_mesh.elements.iter().enumerate() {
-        for face in element_faces(elem.cell_type, &elem.nodes) {
+        for face in element_faces(elem.cell_type, &elem.nodes)? {
             let mut key = face.clone();
             key.sort_unstable();
             if face_count.get(&key).copied().unwrap_or(0) != 1 || !seen.insert(key) {
@@ -322,7 +353,7 @@ pub fn fsi_interface_loads(
                     }
                     let mut nu = vec![ty / len, -tx / len];
                     orient(&mut nu, eid, &face);
-                    let (p0, p1) = (press(face[0]), press(face[1]));
+                    let (p0, p1) = (press(face[0])?, press(face[1])?);
                     for a in 0..2 {
                         loads[face[0] * 2 + a] += nu[a] * len * (2.0 * p0 + p1) / 6.0;
                         loads[face[1] * 2 + a] += nu[a] * len * (p0 + 2.0 * p1) / 6.0;
@@ -348,7 +379,7 @@ pub fn fsi_interface_loads(
                         let mut nu = vec![cr[0] / mag, cr[1] / mag, cr[2] / mag];
                         let sub = vec![face[0], face[k], face[k + 1]];
                         orient(&mut nu, eid, &sub);
-                        add_tri(&mut loads, &sub, &nu, 0.5 * mag);
+                        add_tri(&mut loads, &sub, &nu, 0.5 * mag)?;
                         for &nd in &sub {
                             covered[nd] = true;
                         }
@@ -398,7 +429,7 @@ pub fn fsi_interface_loads(
             loads[s_node * dim + a] += fluid_pressure[f_node] * normal[a];
         }
     }
-    loads
+    Ok(loads)
 }
 
 ///
@@ -432,7 +463,11 @@ pub fn fsi_coupling(
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
-        other => panic!("coupling: unsupported cell {other:?}"),
+        other => {
+            return Err(CouplingError::Interface(format!(
+                "coupling: unsupported cell {other:?}"
+            )))
+        }
     };
     // Displace fluid nodes per the interface map.
     let mut fluid = fluid_mesh.clone();
@@ -440,7 +475,11 @@ pub fn fsi_coupling(
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
-        other => panic!("coupling: unsupported fluid cell {other:?}"),
+        other => {
+            return Err(CouplingError::Interface(format!(
+                "coupling: unsupported fluid cell {other:?}"
+            )))
+        }
     };
     for &(s_node, f_node) in interface {
         let c = fluid.node_coords(f_node).to_vec();
@@ -454,20 +493,23 @@ pub fn fsi_coupling(
     // pushes the structure. The fluid's top and bottom boundaries are no-slip so
     // the system is non-singular; the pressure that develops at the (bottom)
     // interface is what loads the structure.
+    // `unwrap_or(Equal)` rather than `unwrap()`: a NaN fluid coordinate (e.g.
+    // propagated from a prior degenerate solve) must not panic this
+    // comparison — it simply loses its ordering guarantee for that node.
     let top = (0..fluid.node_count())
         .max_by(|&a, &b| {
             fluid.node_coords(a)[1]
                 .partial_cmp(&fluid.node_coords(b)[1])
-                .unwrap()
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .unwrap();
+        .ok_or_else(|| CouplingError::Interface("fsi_coupling: fluid mesh has no nodes".into()))?;
     let bot = (0..fluid.node_count())
         .min_by(|&a, &b| {
             fluid.node_coords(a)[1]
                 .partial_cmp(&fluid.node_coords(b)[1])
-                .unwrap()
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .unwrap();
+        .ok_or_else(|| CouplingError::Interface("fsi_coupling: fluid mesh has no nodes".into()))?;
     let fymax = fluid.node_coords(top)[1];
     let fymin = fluid.node_coords(bot)[1];
     let mut fluid_bc = Vec::new();
@@ -563,9 +605,9 @@ pub fn fsi_coupling(
             .iter()
             .map(|n| struct_mesh.node_coords(*n).to_vec())
             .collect();
-        let (pts, wts) = ref_quad(elem.cell_type, order);
+        let (pts, wts) = ref_quad(elem.cell_type, order)?;
         for (xi, &w) in pts.iter().zip(&wts) {
-            let (n, g) = ref_shape_grad(elem.cell_type, xi);
+            let (n, g) = ref_shape_grad(elem.cell_type, xi)?;
             let map = Map::from_nodes_and_grad(&coords, &g);
             let detj = map.determinant.abs();
             // Interpolate pressure and normal at this quadrature point.
@@ -597,21 +639,25 @@ pub fn fsi_coupling(
 /// element types at local coordinates `xi`. Mirrors the dispatch used by
 /// `tpt-fem-elasticity` so the consistent load transfer reuses the same
 /// reference elements.
-fn ref_shape_grad(cell: CellType, xi: &[f64]) -> (Vec<f64>, Vec<Vec<f64>>) {
-    match cell {
+fn ref_shape_grad(cell: CellType, xi: &[f64]) -> Result<(Vec<f64>, Vec<Vec<f64>>), CouplingError> {
+    Ok(match cell {
         CellType::Line => (Line2::shape(xi), Line2::grad(xi)),
         CellType::Tri => (Tri3::shape(xi), Tri3::grad(xi)),
         CellType::Quad => (Quad4::shape(xi), Quad4::grad(xi)),
         CellType::Tet => (Tet4::shape(xi), Tet4::grad(xi)),
         CellType::Hex => (Hex8::shape(xi), Hex8::grad(xi)),
-        other => panic!("fsi consistent load: unsupported cell {other:?}"),
-    }
+        other => {
+            return Err(CouplingError::Interface(format!(
+                "fsi consistent load: unsupported cell {other:?}"
+            )))
+        }
+    })
 }
 
 /// Reference quadrature `(points, weights)` for the supported structure element
 /// types at the given rule `order`.
-fn ref_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
-    match cell {
+fn ref_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), CouplingError> {
+    Ok(match cell {
         CellType::Line => {
             let r = gauss_legendre(order);
             (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
@@ -632,8 +678,12 @@ fn ref_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             let r = tensor_cube(&gauss_legendre(order));
             (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
         }
-        other => panic!("fsi consistent load: unsupported cell {other:?}"),
-    }
+        other => {
+            return Err(CouplingError::Interface(format!(
+                "fsi consistent load: unsupported cell {other:?}"
+            )))
+        }
+    })
 }
 
 #[cfg(test)]
@@ -870,7 +920,7 @@ mod tests {
         let interface = [(n01, 0usize), (n11, 1usize)];
         // Fluid "pressure" array indexed by fluid node id.
         let pressure = vec![2.0_f64; 8];
-        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        let f = fsi_interface_loads(&mesh, &interface, &pressure).unwrap();
         for &(s, _) in &interface {
             assert!(f[s * 2].abs() < 1e-14, "horizontal component {f:?}");
             let expect = 2.0 * 1.0 / 2.0; // p·L/2
@@ -902,7 +952,7 @@ mod tests {
         let mesh = b.build();
         let interface = [(n10, 0usize), (n11, 1usize)];
         let pressure = vec![3.0_f64; 8];
-        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        let f = fsi_interface_loads(&mesh, &interface, &pressure).unwrap();
         for &(s, _) in &interface {
             let expect = 3.0 * 1.0 / 2.0;
             assert!(
@@ -931,10 +981,26 @@ mod tests {
         let mut pressure = vec![0.0_f64; 8];
         pressure[0] = 0.0; // fluid node above structure node (0,1)
         pressure[1] = 1.0; // fluid node above structure node (1,1)
-        let f = fsi_interface_loads(&mesh, &interface, &pressure);
+        let f = fsi_interface_loads(&mesh, &interface, &pressure).unwrap();
         let fy: f64 = f.chunks_exact(2).map(|c| c[1]).sum();
         assert!((fy - 0.5).abs() < 1e-12, "resultant {fy} != 0.5");
         let moment = f[n01 * 2 + 1] * 0.0 + f[n11 * 2 + 1] * 1.0;
         assert!((moment - 1.0 / 3.0).abs() < 1e-12, "moment {moment} != 1/3");
+    }
+
+    #[test]
+    fn fsi_interface_loads_errors_on_unsupported_cell_instead_of_panicking() {
+        // `fsi_interface_loads` only supports 2-D (Tri/Quad) and 3-D
+        // (Tet/Hex) structure meshes; a 1-D (Line) mesh must return
+        // `CouplingError::Interface` rather than panicking.
+        let mut b = MeshBuilder::new();
+        let n0 = b.add_node(vec![0.0]);
+        let n1 = b.add_node(vec![1.0]);
+        b.add_element(CellType::Line, vec![n0, n1]);
+        let mesh = b.build();
+        let interface = [(n0, 0usize), (n1, 1usize)];
+        let pressure = vec![1.0_f64; 2];
+        let err = fsi_interface_loads(&mesh, &interface, &pressure).unwrap_err();
+        assert!(matches!(err, CouplingError::Interface(_)), "got {err:?}");
     }
 }

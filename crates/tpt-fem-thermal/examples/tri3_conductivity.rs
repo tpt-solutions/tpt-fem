@@ -16,7 +16,7 @@ fn main() {
     b.add_element(CellType::Tri, vec![n0, n1, n2]);
     let mesh = b.build();
 
-    let k = poisson_element_matrix(&mesh, 0, 1.0, 2);
+    let k = poisson_element_matrix(&mesh, 0, 1.0, 2).expect("order 2 is valid");
 
     println!("Tri3 conductivity matrix (k=1):");
     for row in &k {

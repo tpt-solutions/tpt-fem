@@ -23,9 +23,32 @@
 #![allow(clippy::needless_range_loop)]
 
 use tpt_fem_quadrature::{
-    gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
-    TriangleRule,
+    tensor_cube, tensor_square, tetrahedron, triangle, try_gauss_legendre, QuadratureError,
+    TetrahedronRule, TriangleRule,
 };
+
+/// Errors returned by this crate's fallible quadrature-rule constructors.
+#[derive(Debug)]
+pub enum ElementError {
+    /// The requested Gauss–Legendre order is out of range.
+    Quadrature(QuadratureError),
+}
+
+impl std::fmt::Display for ElementError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementError::Quadrature(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ElementError {}
+
+impl From<QuadratureError> for ElementError {
+    fn from(e: QuadratureError) -> Self {
+        ElementError::Quadrature(e)
+    }
+}
 
 /// A reference finite element.
 ///
@@ -746,16 +769,25 @@ impl Map {
 }
 
 /// 1-D Gauss–Legendre rule on `[-1, 1]` for a line element.
-pub fn line_rule(order: usize) -> tpt_fem_quadrature::Quad1D {
-    gauss_legendre(order)
+///
+/// Returns [`ElementError`] if `order` is outside the supported `1..=5` range,
+/// rather than panicking.
+pub fn line_rule(order: usize) -> Result<tpt_fem_quadrature::Quad1D, ElementError> {
+    Ok(try_gauss_legendre(order)?)
 }
 /// Tensor-product rule on `[-1, 1]²` for a quadrilateral element.
-pub fn quad_rule(order: usize) -> tpt_fem_quadrature::Quad2D {
-    tensor_square(&gauss_legendre(order))
+///
+/// Returns [`ElementError`] if `order` is outside the supported `1..=5` range,
+/// rather than panicking.
+pub fn quad_rule(order: usize) -> Result<tpt_fem_quadrature::Quad2D, ElementError> {
+    Ok(tensor_square(&try_gauss_legendre(order)?))
 }
 /// Tensor-product rule on `[-1, 1]³` for a hexahedral element.
-pub fn hex_rule(order: usize) -> tpt_fem_quadrature::Quad3D {
-    tensor_cube(&gauss_legendre(order))
+///
+/// Returns [`ElementError`] if `order` is outside the supported `1..=5` range,
+/// rather than panicking.
+pub fn hex_rule(order: usize) -> Result<tpt_fem_quadrature::Quad3D, ElementError> {
+    Ok(tensor_cube(&try_gauss_legendre(order)?))
 }
 /// Rule on the reference triangle.
 pub fn tri_rule(rule: TriangleRule) -> tpt_fem_quadrature::Quad2D {
@@ -904,6 +936,17 @@ mod tests {
             &[2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0],
             1e-12
         ));
+    }
+
+    #[test]
+    fn rule_constructors_error_instead_of_panicking_out_of_range() {
+        assert!(line_rule(0).is_err());
+        assert!(line_rule(6).is_err());
+        assert!(quad_rule(6).is_err());
+        assert!(hex_rule(6).is_err());
+        assert!(line_rule(3).is_ok());
+        assert!(quad_rule(3).is_ok());
+        assert!(hex_rule(3).is_ok());
     }
 }
 

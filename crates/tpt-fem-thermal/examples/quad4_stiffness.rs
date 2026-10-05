@@ -18,7 +18,7 @@ fn main() {
     b.add_element(CellType::Quad, vec![n00, n10, n11, n01]);
     let mesh = b.build();
 
-    let k = poisson_element_matrix(&mesh, 0, 1.0, 2);
+    let k = poisson_element_matrix(&mesh, 0, 1.0, 2).expect("order 2 is valid");
 
     // Symmetry.
     for i in 0..4 {

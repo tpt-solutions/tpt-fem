@@ -21,15 +21,57 @@
 //! let base = Coo { rows: vec![0], cols: vec![0], vals: vec![10.0] };
 //! let load = vec![-4.0];
 //! let con = ContactConstraint { dof: 0, lower: 0.0 };
-//! let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 50, 1e-9);
+//! let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 50, 1e-9).unwrap();
 //! assert!(u[0].abs() < 1e-6);
 //! assert!((lambda[0] - 4.0).abs() < 1e-3);
 //! ```
 
-use tpt_fem_sparse::{solve, Coo};
+use tpt_fem_sparse::{solve, Coo, SparseError};
 
 mod octree;
 pub use octree::Octree;
+
+/// Errors returned by [`augmented_lagrangian`].
+#[derive(Debug)]
+pub enum ContactError {
+    /// The penalty-augmented linear system failed to solve (e.g. `base` is
+    /// singular or under-constrained, such as an unrestrained rigid-body
+    /// mode).
+    Sparse(SparseError),
+    /// The multiplier iteration did not drive the constraint violation below
+    /// `tol` within `max_iter` steps.
+    NotConverged {
+        /// The largest remaining `|lower - x|` violation across all
+        /// constraints when iteration stopped.
+        max_violation: f64,
+        /// The iteration budget that was exhausted.
+        max_iter: usize,
+    },
+}
+
+impl std::fmt::Display for ContactError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContactError::Sparse(e) => write!(f, "contact augmented system failed to solve: {e}"),
+            ContactError::NotConverged {
+                max_violation,
+                max_iter,
+            } => write!(
+                f,
+                "augmented-Lagrangian contact iteration did not converge within {max_iter} \
+                 iterations (max violation {max_violation:e})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ContactError {}
+
+impl From<SparseError> for ContactError {
+    fn from(e: SparseError) -> Self {
+        ContactError::Sparse(e)
+    }
+}
 
 /// A unilateral constraint `x_dof ≥ lower` (non-penetration against a rigid
 /// obstacle located at `lower` along the constrained DOF's axis).
@@ -69,6 +111,12 @@ pub fn penalty_contact(
 /// `λ ← max(0, λ + κ·(lower − x))` (the standard ALM multiplier update for a
 /// unilateral constraint). Converges to the hard-contact solution (exact
 /// non-penetration) for a sufficiently large `penalty`.
+///
+/// Returns [`ContactError::Sparse`] if the penalty-augmented system is
+/// singular (e.g. an under-constrained `base`), or [`ContactError::NotConverged`]
+/// if the multiplier iteration does not drive the violation below `tol`
+/// within `max_iter` steps — rather than panicking or silently returning a
+/// non-converged result.
 pub fn augmented_lagrangian(
     base: &Coo,
     load: &[f64],
@@ -76,9 +124,10 @@ pub fn augmented_lagrangian(
     penalty: f64,
     max_iter: usize,
     tol: f64,
-) -> (Vec<f64>, Vec<f64>) {
+) -> Result<(Vec<f64>, Vec<f64>), ContactError> {
     let mut lambda = vec![0.0; constraints.len()];
     let mut u = vec![0.0; load.len()];
+    let mut max_viol = f64::INFINITY;
     for _ in 0..max_iter {
         // Fold multipliers into the load: f_eff = f + Σ λ n  (n = +1 for x ≥ lower).
         let mut f_eff = load.to_vec();
@@ -86,9 +135,9 @@ pub fn augmented_lagrangian(
             f_eff[c.dof] += lambda[i];
         }
         let (k_aug, f_aug) = penalty_contact(base, &f_eff, constraints, penalty);
-        let u_new = solve(&k_aug, &f_aug).expect("contact augmented system must solve");
+        let u_new = solve(&k_aug, &f_aug)?;
         // Multiplier update on the violation (lower − x).
-        let mut max_viol = 0.0_f64;
+        max_viol = 0.0_f64;
         for (i, c) in constraints.iter().enumerate() {
             let viol = c.lower - u_new[c.dof];
             let new_lambda = (lambda[i] + penalty * viol).max(0.0);
@@ -97,10 +146,13 @@ pub fn augmented_lagrangian(
         }
         u = u_new;
         if max_viol < tol {
-            break;
+            return Ok((u, lambda));
         }
     }
-    (u, lambda)
+    Err(ContactError::NotConverged {
+        max_violation: max_viol,
+        max_iter,
+    })
 }
 
 /// Nearest-node pairing between two surfaces `a` and `b` (each a list of
@@ -178,7 +230,7 @@ mod tests {
         };
         let load = vec![-4.0];
         let con = ContactConstraint { dof: 0, lower: 0.0 };
-        let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 100, 1e-9);
+        let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 100, 1e-9).unwrap();
         assert!(
             u[0].abs() < 1e-6,
             "x should be held at the wall, got {}",
@@ -202,9 +254,43 @@ mod tests {
         };
         let load = vec![0.0, -3.0];
         let con = ContactConstraint { dof: 1, lower: 0.0 };
-        let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 200, 1e-8);
+        let (u, lambda) = augmented_lagrangian(&base, &load, &[con], 1e4, 200, 1e-8).unwrap();
         assert!(u[1].abs() < 1e-6);
         assert!((lambda[0] - 3.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn augmented_lagrangian_reports_solve_failure_instead_of_panicking() {
+        // `base` has a zero stiffness at the constrained DOF and no penalty
+        // path back to ground other than the contact constraint itself; with
+        // `penalty = 0` the augmented system is exactly singular (a
+        // rigid-body mode), which must surface as a `Sparse` error rather
+        // than panicking the process.
+        let base = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![0.0],
+        };
+        let load = vec![-1.0];
+        let con = ContactConstraint { dof: 0, lower: 0.0 };
+        let err = augmented_lagrangian(&base, &load, &[con], 0.0, 10, 1e-9).unwrap_err();
+        assert!(matches!(err, ContactError::Sparse(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn augmented_lagrangian_reports_non_convergence() {
+        // A single iteration is not enough to drive a tight tolerance to
+        // zero from a cold start; this must report `NotConverged` instead of
+        // silently returning the partial result.
+        let base = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![10.0],
+        };
+        let load = vec![-4.0];
+        let con = ContactConstraint { dof: 0, lower: 0.0 };
+        let err = augmented_lagrangian(&base, &load, &[con], 1e4, 1, 1e-12).unwrap_err();
+        assert!(matches!(err, ContactError::NotConverged { .. }), "got {err:?}");
     }
 
     #[test]

@@ -6,8 +6,11 @@ elements, quadrature, mesh I/O, sparse assembly, physics (thermal, elasticity),
 eigen- and continuation-solvers, a native tet-mesh generator, and a CLI driver —
 all under a permissive `MIT OR Apache-2.0` policy.
 
-Crates.io publishing is intentionally **out of scope** for this repository; the
-crates are consumed as path dependencies within the workspace.
+All crates are published to crates.io as of the `0.1.0` release (see
+[`PUBLISHING.md`](PUBLISHING.md) for the publish order and status). Within this
+workspace, crates continue to depend on each other via path dependencies; the
+crates.io releases are what downstream consumers outside the workspace should
+depend on.
 
 ## Crates
 

@@ -20,7 +20,7 @@ use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
 };
 use tpt_fem_mesh::{CellType, ElementId, Mesh};
-use tpt_fem_quadrature::{gauss_legendre, tensor_square, triangle, TriangleRule};
+use tpt_fem_quadrature::{tensor_square, triangle, try_gauss_legendre, QuadratureError, TriangleRule};
 use tpt_fem_sparse::{solve, Coo, SparseError};
 
 /// Default quadrature order used for boundary-face integration.
@@ -333,10 +333,13 @@ fn ref_dim(cell: CellType) -> usize {
 }
 
 /// Quadrature points (in face-reference coordinates) and weights for a face.
-fn face_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
-    match cell {
+///
+/// Returns [`QuadratureError`] if `order` is outside the supported `1..=5`
+/// range, rather than panicking.
+fn face_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), QuadratureError> {
+    Ok(match cell {
         CellType::Line => {
-            let r = gauss_legendre(order);
+            let r = try_gauss_legendre(order)?;
             (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
         }
         CellType::Tri => {
@@ -347,14 +350,14 @@ fn face_quad(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
             )
         }
         CellType::Quad => {
-            let r = tensor_square(&gauss_legendre(order));
+            let r = tensor_square(&try_gauss_legendre(order)?);
             (
                 r.points.iter().map(|p| vec![p[0], p[1]]).collect(),
                 r.weights,
             )
         }
         other => panic!("face_quad: unsupported face cell {other:?}"),
-    }
+    })
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
@@ -594,17 +597,21 @@ pub fn apply_neumann(
     flux: impl Fn(&[f64], &[f64]) -> f64,
     rhs: &mut [f64],
 ) {
-    apply_neumann_order(mesh, dofs_per_node, flux, rhs, FACE_QUAD_ORDER);
+    apply_neumann_order(mesh, dofs_per_node, flux, rhs, FACE_QUAD_ORDER)
+        .expect("FACE_QUAD_ORDER is always a valid order");
 }
 
 /// Like [`apply_neumann`] with an explicit quadrature order.
+///
+/// Returns [`SparseError`] (wrapping a [`QuadratureError`](tpt_fem_quadrature::QuadratureError))
+/// if `order` is out of range, rather than panicking.
 pub fn apply_neumann_order(
     mesh: &Mesh,
     dofs_per_node: usize,
     flux: impl Fn(&[f64], &[f64]) -> f64,
     rhs: &mut [f64],
     order: usize,
-) {
+) -> Result<(), SparseError> {
     for (eid, fi) in boundary_faces(mesh) {
         let elem = &mesh.elements[eid];
         let f = &faces_of(elem.cell_type)[fi];
@@ -613,7 +620,7 @@ pub fn apply_neumann_order(
             .iter()
             .map(|&n| mesh.node_coords(n).to_vec())
             .collect();
-        let (qpts, qw) = face_quad(f.face, order);
+        let (qpts, qw) = face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
         let refp = ref_nodes(elem.cell_type);
         let dim = phys[0].len();
         let elem_centroid = mean(&phys);
@@ -664,6 +671,7 @@ pub fn apply_neumann_order(
             let _ = xr;
         }
     }
+    Ok(())
 }
 
 /// Add a Robin (mixed) boundary contribution to the global matrix `coo`.
@@ -677,17 +685,21 @@ pub fn apply_robin(
     coeff: impl Fn(&[f64], &[f64]) -> f64,
     coo: &mut Coo,
 ) {
-    apply_robin_order(mesh, dofs_per_node, coeff, coo, FACE_QUAD_ORDER);
+    apply_robin_order(mesh, dofs_per_node, coeff, coo, FACE_QUAD_ORDER)
+        .expect("FACE_QUAD_ORDER is always a valid order");
 }
 
 /// Like [`apply_robin`] with an explicit quadrature order.
+///
+/// Returns [`SparseError`] (wrapping a [`QuadratureError`](tpt_fem_quadrature::QuadratureError))
+/// if `order` is out of range, rather than panicking.
 pub fn apply_robin_order(
     mesh: &Mesh,
     dofs_per_node: usize,
     coeff: impl Fn(&[f64], &[f64]) -> f64,
     coo: &mut Coo,
     order: usize,
-) {
+) -> Result<(), SparseError> {
     for (eid, fi) in boundary_faces(mesh) {
         let elem = &mesh.elements[eid];
         let f = &faces_of(elem.cell_type)[fi];
@@ -696,7 +708,7 @@ pub fn apply_robin_order(
             .iter()
             .map(|&n| mesh.node_coords(n).to_vec())
             .collect();
-        let (qpts, qw) = face_quad(f.face, order);
+        let (qpts, qw) = face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
         let refp = ref_nodes(elem.cell_type);
         let dim = phys[0].len();
         let elem_centroid = mean(&phys);
@@ -750,6 +762,7 @@ pub fn apply_robin_order(
             let _ = xr;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -857,5 +870,21 @@ mod tests {
         let bf = boundary_faces(&mesh);
         // Square has 4 edges, each an edge of exactly one triangle.
         assert_eq!(bf.len(), 4);
+    }
+
+    #[test]
+    fn order_out_of_range_errors_instead_of_panicking() {
+        let mut b = MeshBuilder::new();
+        let a = b.add_node(vec![0.0, 0.0]);
+        let c = b.add_node(vec![1.0, 0.0]);
+        let d = b.add_node(vec![0.0, 1.0]);
+        b.add_element(CellType::Tri, vec![a, c, d]);
+        let mesh = b.build();
+
+        let mut rhs = vec![0.0; 3];
+        assert!(apply_neumann_order(&mesh, 1, |_, _| 1.0, &mut rhs, 6).is_err());
+
+        let mut coo = Coo::new();
+        assert!(apply_robin_order(&mesh, 1, |_, _| 1.0, &mut coo, 6).is_err());
     }
 }

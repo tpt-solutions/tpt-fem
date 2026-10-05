@@ -97,7 +97,8 @@ fn main() {
 
     // Hard-contact solve via the library's augmented-Lagrangian iteration.
     let tol = 1e-10;
-    let (u_al, lambda) = augmented_lagrangian(&k, &compressive, &cons, penalty, 200, tol);
+    let (u_al, lambda) =
+        augmented_lagrangian(&k, &compressive, &cons, penalty, 200, tol).expect("AL converges");
     let al_max = u_al[1..].iter().cloned().fold(0.0_f64, f64::min);
     let pen_max = u_pen[1..].iter().cloned().fold(0.0_f64, f64::min);
     let sum_lambda: f64 = lambda.iter().sum();
@@ -127,7 +128,8 @@ fn main() {
     // the bar pulling AWAY from the stop every violation is negative, the
     // update max(0, ...) keeps every multiplier at zero (no adhesion), and
     // non-penetration holds automatically.
-    let (u_lift, lambda_t) = augmented_lagrangian(&k, &tensile, &cons, penalty, 200, tol);
+    let (u_lift, lambda_t) =
+        augmented_lagrangian(&k, &tensile, &cons, penalty, 200, tol).expect("AL converges");
     let sum_lambda_t: f64 = lambda_t.iter().sum();
     let min_gap = u_lift[1..].iter().cloned().fold(f64::INFINITY, f64::min);
     println!("\ntension case (lift-off):");

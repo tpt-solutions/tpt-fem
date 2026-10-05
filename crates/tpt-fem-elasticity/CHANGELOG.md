@@ -15,6 +15,19 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `elasticity_element_matrix` now returns `Result<_, ElasticityError>`; the
   assembly primitive gained a fallible `try_assemble` so element-matrix failures
   propagate instead of panicking.
+- `ElasticityError::Quadrature` variant, and `elasticity_body_vector`,
+  `elasticity_mass_matrix`, `elasticity_lumped_mass` now return
+  `Result<_, ElasticityError>` instead of panicking when `quad_order` (or,
+  for P2 element types, `quad_order + 1`) is outside `tpt-fem-quadrature`'s
+  supported `1..=5` range. `solve_elasticity` / `solve_modal` are unchanged
+  (still `Result<_, SparseError>`); `ElasticityError` converts into
+  `SparseError` automatically.
+
+### Changed
+
+- **Breaking:** the three points above change the return type of
+  `elasticity_body_vector`, `elasticity_mass_matrix`, and
+  `elasticity_lumped_mass` from a bare value to `Result`.
 
 ## [0.1.0] - 2026-08-13
 
