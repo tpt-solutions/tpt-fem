@@ -29,7 +29,7 @@ members = [
     "crates/tpt-fem-amr",
     "crates/tpt-fem-modal",
 ]
-exclude = ["fuzz", "crates/tpt-fem-py", "crates/tpt-fem-wasm", "crates/tpt-fem-capi"]
+exclude = ["fuzz", "crates/tpt-fem-py", "crates/tpt-fem-wasm", "crates/tpt-fem-capi", "crates/tpt-fem-gpu"]
 
 [workspace.package]
 description = "tpt-fem — mesh-based finite element method core for tpt-solutions"

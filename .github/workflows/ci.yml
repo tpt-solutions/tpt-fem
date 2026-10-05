@@ -175,6 +175,20 @@ jobs:
         working-directory: crates/tpt-fem-wasm
         run: cargo build --release --target wasm32-unknown-unknown
 
+  # The GPU crate is excluded from the workspace; build + test it. Runners have
+  # no GPU, so the GPU tests skip themselves (they pass with a notice).
+  gpu-crate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tpt-fem-gpu
+      - name: Build and test tpt-fem-gpu
+        working-directory: crates/tpt-fem-gpu
+        run: cargo test
+
   # py/capi/wasm are not workspace members, so Cargo never checks that their
   # `tpt-fem*` version pins track the workspace.
   pins:
