@@ -215,7 +215,11 @@ impl Csr {
 ///
 /// # Cost note
 ///
-/// The default backend assembles a **dense** `n×n` matrix regardless of `A`'s
+/// Systems with at least 200 unknowns that are symmetric positive-definite are
+/// automatically routed to the sparse envelope Cholesky ([`solve_skyline`]);
+/// large unsymmetric or indefinite systems whose reordered band is narrow use
+/// the banded LU ([`solve_banded`]); everything else uses the dense path described
+/// below. The default dense backend assembles a **dense** `n×n` matrix regardless of `A`'s
 /// sparsity and factors it in `O(n³)` time with `O(n²)` storage. This is fine
 /// for the small, hand-built meshes used to validate the crate, but it does
 /// **not** scale to large sparse problems. For those, enable the optional
@@ -229,6 +233,10 @@ pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
         .next()
         .ok_or_else(|| SparseError::Numeric("solve received an empty right-hand side".into()))
 }
+
+/// System size from which [`solve`]/[`solve_multi`] try the sparse envelope
+/// Cholesky ([`solve_skyline`]) before the dense LU.
+const SKYLINE_THRESHOLD: usize = 200;
 
 /// Options for the iterative [`solve_cg`] solver.
 #[derive(Clone, Copy, Debug)]
@@ -367,6 +375,389 @@ pub fn solve_cg(coo: &Coo, rhs: &[f64], opts: &CgOptions) -> Result<CgSolution, 
     )))
 }
 
+/// Reverse Cuthill-McKee ordering of the symmetrised sparsity pattern of `a`.
+///
+/// Returns `perm` with `perm[new] = old`. Each connected component is started
+/// from a minimum-degree node and visited breadth-first (neighbours by
+/// ascending degree); the final order is reversed. This clusters the non-zeros
+/// near the diagonal, which is what bounds the fill of an envelope Cholesky.
+fn reverse_cuthill_mckee(a: &Csr) -> Vec<usize> {
+    let n = a.nrows;
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for r in 0..n {
+        for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+            let col = a.col_ind[c];
+            if col != r && col < n {
+                adj[r].push(col);
+                adj[col].push(r);
+            }
+        }
+    }
+    for list in &mut adj {
+        list.sort_unstable();
+        list.dedup();
+    }
+    let degree: Vec<usize> = adj.iter().map(Vec::len).collect();
+    let mut by_degree: Vec<usize> = (0..n).collect();
+    by_degree.sort_by_key(|&i| degree[i]);
+
+    let mut visited = vec![false; n];
+    let mut order = Vec::with_capacity(n);
+    for &start in &by_degree {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let head = order.len();
+        order.push(start);
+        let mut qi = head;
+        while qi < order.len() {
+            let v = order[qi];
+            qi += 1;
+            let mut next: Vec<usize> = adj[v].iter().copied().filter(|&w| !visited[w]).collect();
+            next.sort_by_key(|&w| degree[w]);
+            for w in next {
+                visited[w] = true;
+                order.push(w);
+            }
+        }
+    }
+    order.reverse();
+    order
+}
+
+/// Solve the **symmetric positive-definite** system `A x = b` with a sparse
+/// direct method: reverse Cuthill-McKee reordering followed by an envelope
+/// (skyline) Cholesky factorisation `P A P^T = L L^T`.
+///
+/// Memory is `O(n * bandwidth)` and time `O(n * bandwidth^2)` after
+/// reordering, which for mesh-based FEM matrices is far below the dense
+/// `O(n^2)` / `O(n^3)` of [`solve`] -- e.g. a 2-D Laplacian with 10^4 unknowns
+/// factors in milliseconds instead of needing ~800 MB. Pure Rust, no external
+/// toolchain. Only the lower triangle of `A` is read (duplicates summed); `A`
+/// must be square and SPD, otherwise [`SparseError::Numeric`] reports a
+/// non-positive pivot. Unlike [`solve_cg`] the result is exact to round-off and
+/// the cost does not depend on conditioning.
+pub fn solve_skyline(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
+    if coo.is_empty() && rhs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let a = coo.to_csr();
+    if a.ncols != a.nrows {
+        return Err(SparseError::Numeric(format!(
+            "solve_skyline requires a square matrix, got {} x {}",
+            a.nrows, a.ncols
+        )));
+    }
+    if rhs.len() != a.nrows {
+        return Err(SparseError::Numeric(format!(
+            "rhs length {} does not match matrix dimension {}",
+            rhs.len(),
+            a.nrows
+        )));
+    }
+    SkylineFactor::new(&a)?.solve(rhs)
+}
+
+/// Envelope Cholesky factor `P A P^T = L L^T` of an SPD matrix.
+struct SkylineFactor {
+    perm: Vec<usize>,
+    first: Vec<usize>,
+    start: Vec<usize>,
+    l: Vec<f64>,
+}
+
+impl SkylineFactor {
+    /// Factor the square CSR matrix `a` (only its lower triangle is read).
+    fn new(a: &Csr) -> Result<Self, SparseError> {
+        let n = a.nrows;
+        let perm = reverse_cuthill_mckee(a);
+        let mut inv = vec![0usize; n];
+        for (new, &old) in perm.iter().enumerate() {
+            inv[old] = new;
+        }
+
+        // Envelope of the permuted lower triangle: first[i] = leftmost column of row i.
+        let mut first: Vec<usize> = (0..n).collect();
+        for r in 0..n {
+            for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+                let (i, j) = (inv[r], inv[a.col_ind[c]]);
+                let (hi, lo) = if i >= j { (i, j) } else { (j, i) };
+                first[hi] = first[hi].min(lo);
+            }
+        }
+        let mut start = vec![0usize; n + 1];
+        for i in 0..n {
+            start[i + 1] = start[i] + (i - first[i] + 1);
+        }
+        let mut l = vec![0.0f64; start[n]];
+        let at = |i: usize, j: usize| start[i] + (j - first[i]);
+        for r in 0..n {
+            for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+                // Read each stored entry of the original lower triangle once and
+                // mirror it into the permuted lower triangle.
+                if a.col_ind[c] <= r {
+                    let (i, j) = (inv[r], inv[a.col_ind[c]]);
+                    let (hi, lo) = if i >= j { (i, j) } else { (j, i) };
+                    l[at(hi, lo)] += a.values[c];
+                }
+            }
+        }
+
+        // In-place envelope Cholesky.
+        for i in 0..n {
+            for j in first[i]..=i {
+                let k0 = first[i].max(first[j]);
+                let mut sum = l[at(i, j)];
+                for k in k0..j {
+                    sum -= l[at(i, k)] * l[at(j, k)];
+                }
+                if j < i {
+                    l[at(i, j)] = sum / l[at(j, j)];
+                } else {
+                    if !(sum.is_finite() && sum > 0.0) {
+                        return Err(SparseError::Numeric(format!(
+                            "solve_skyline: non-positive pivot at row {i}; matrix is not positive-definite"
+                        )));
+                    }
+                    l[at(i, i)] = sum.sqrt();
+                }
+            }
+        }
+        Ok(SkylineFactor {
+            perm,
+            first,
+            start,
+            l,
+        })
+    }
+
+    /// Solve `A x = rhs` with the stored factor.
+    fn solve(&self, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
+        let n = self.perm.len();
+        let at = |i: usize, j: usize| self.start[i] + (j - self.first[i]);
+        // L y = P b, then L^T z = y, then x = P^T z.
+        let mut y: Vec<f64> = self.perm.iter().map(|&old| rhs[old]).collect();
+        for i in 0..n {
+            let mut sum = y[i];
+            for k in self.first[i]..i {
+                sum -= self.l[at(i, k)] * y[k];
+            }
+            y[i] = sum / self.l[at(i, i)];
+        }
+        for i in (0..n).rev() {
+            y[i] /= self.l[at(i, i)];
+            let yi = y[i];
+            for k in self.first[i]..i {
+                y[k] -= self.l[at(i, k)] * yi;
+            }
+        }
+        let mut x = vec![0.0; n];
+        for (new, &old) in self.perm.iter().enumerate() {
+            x[old] = y[new];
+        }
+        Ok(x)
+    }
+}
+
+impl Csr {
+    /// `true` if the matrix equals its transpose to within `rel_tol` of the
+    /// largest entry magnitude (`O(nnz log nnz)`).
+    pub fn is_symmetric(&self, rel_tol: f64) -> bool {
+        if self.nrows != self.ncols {
+            return false;
+        }
+        let scale = self.values.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let tol = rel_tol * scale;
+        for r in 0..self.nrows {
+            for c in self.row_ptrs[r]..self.row_ptrs[r + 1] {
+                let col = self.col_ind[c];
+                let lo = self.row_ptrs[col];
+                let hi = self.row_ptrs[col + 1];
+                // Columns within a row are sorted (see `Coo::to_csr`).
+                let mirror = match self.col_ind[lo..hi].binary_search(&r) {
+                    Ok(k) => self.values[lo + k],
+                    Err(_) => 0.0,
+                };
+                if (self.values[c] - mirror).abs() > tol {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Banded LU factorisation with partial pivoting (LAPACK `gbtf2` layout) of a
+/// reverse-Cuthill-McKee-permuted matrix. Handles unsymmetric and indefinite
+/// systems.
+struct BandedLu {
+    perm: Vec<usize>,
+    n: usize,
+    kl: usize,
+    kv: usize,
+    ldab: usize,
+    ab: Vec<f64>,
+    ipiv: Vec<usize>,
+}
+
+impl BandedLu {
+    /// Half-bandwidths `(kl, ku)` of `a` after the RCM permutation, plus the
+    /// permutation itself.
+    fn bandwidths(a: &Csr) -> (Vec<usize>, Vec<usize>, usize, usize) {
+        let perm = reverse_cuthill_mckee(a);
+        let mut inv = vec![0usize; a.nrows];
+        for (new, &old) in perm.iter().enumerate() {
+            inv[old] = new;
+        }
+        let (mut kl, mut ku) = (0usize, 0usize);
+        for r in 0..a.nrows {
+            for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+                let (i, j) = (inv[r], inv[a.col_ind[c]]);
+                if i > j {
+                    kl = kl.max(i - j);
+                } else {
+                    ku = ku.max(j - i);
+                }
+            }
+        }
+        (perm, inv, kl, ku)
+    }
+
+    fn new(
+        a: &Csr,
+        perm: Vec<usize>,
+        inv: &[usize],
+        kl: usize,
+        ku: usize,
+    ) -> Result<Self, SparseError> {
+        let n = a.nrows;
+        let kv = kl + ku;
+        let ldab = 2 * kl + ku + 1;
+        let mut ab = vec![0.0f64; ldab * n];
+        for r in 0..n {
+            for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+                let (i, j) = (inv[r], inv[a.col_ind[c]]);
+                ab[(kv + i - j) + j * ldab] += a.values[c];
+            }
+        }
+        let mut ipiv = vec![0usize; n];
+        let mut ju = 0usize;
+        for j in 0..n {
+            let km = kl.min(n - 1 - j);
+            // Pivot search in column j, rows j..=j+km.
+            let mut jp = 0usize;
+            let mut best = ab[kv + j * ldab].abs();
+            for i in 1..=km {
+                let v = ab[kv + i + j * ldab].abs();
+                if v > best {
+                    best = v;
+                    jp = i;
+                }
+            }
+            ipiv[j] = jp;
+            if !(best.is_finite() && best > 0.0) {
+                return Err(SparseError::Numeric(format!(
+                    "banded LU: singular matrix (zero pivot in column {j})"
+                )));
+            }
+            ju = ju.max((j + ku + jp).min(n - 1));
+            if jp != 0 {
+                for c in 0..=(ju - j) {
+                    let a_idx = (kv + jp - c) + (j + c) * ldab;
+                    let b_idx = (kv - c) + (j + c) * ldab;
+                    ab.swap(a_idx, b_idx);
+                }
+            }
+            if km > 0 {
+                let piv = ab[kv + j * ldab];
+                for i in 1..=km {
+                    ab[kv + i + j * ldab] /= piv;
+                }
+                for c in 1..=(ju - j) {
+                    let u = ab[(kv - c) + (j + c) * ldab];
+                    if u != 0.0 {
+                        for i in 1..=km {
+                            let l = ab[kv + i + j * ldab];
+                            ab[(kv + i - c) + (j + c) * ldab] -= l * u;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(BandedLu {
+            perm,
+            n,
+            kl,
+            kv,
+            ldab,
+            ab,
+            ipiv,
+        })
+    }
+
+    fn solve(&self, rhs: &[f64]) -> Vec<f64> {
+        let (n, kl, kv, ldab) = (self.n, self.kl, self.kv, self.ldab);
+        let mut b: Vec<f64> = self.perm.iter().map(|&old| rhs[old]).collect();
+        for j in 0..n.saturating_sub(1) {
+            let lm = kl.min(n - 1 - j);
+            let l = j + self.ipiv[j];
+            if l != j {
+                b.swap(l, j);
+            }
+            let bj = b[j];
+            for i in 1..=lm {
+                b[j + i] -= self.ab[kv + i + j * ldab] * bj;
+            }
+        }
+        for j in (0..n).rev() {
+            b[j] /= self.ab[kv + j * ldab];
+            let bj = b[j];
+            let i1 = j.saturating_sub(kv);
+            for i in i1..j {
+                b[i] -= self.ab[(kv + i - j) + j * ldab] * bj;
+            }
+        }
+        let mut x = vec![0.0; n];
+        for (new, &old) in self.perm.iter().enumerate() {
+            x[old] = b[new];
+        }
+        x
+    }
+}
+
+/// Solve a general (possibly unsymmetric or indefinite) sparse system `A x = b`
+/// with a banded LU after reverse Cuthill-McKee reordering and partial
+/// pivoting.
+///
+/// Memory is `O(n * (2 kl + ku + 1))` for the half-bandwidths `kl`, `ku` of the
+/// reordered matrix, so it scales like [`solve_skyline`] on mesh-based
+/// matrices but needs no symmetry or definiteness: it is the pure-Rust sparse
+/// direct path for e.g. convection-dominated or saddle-point systems. Returns
+/// [`SparseError::Numeric`] for a non-square matrix, mismatched `rhs`, or a
+/// singular matrix.
+pub fn solve_banded(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
+    if coo.is_empty() && rhs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let a = coo.to_csr();
+    if a.ncols != a.nrows {
+        return Err(SparseError::Numeric(format!(
+            "solve_banded requires a square matrix, got {} x {}",
+            a.nrows, a.ncols
+        )));
+    }
+    if rhs.len() != a.nrows {
+        return Err(SparseError::Numeric(format!(
+            "rhs length {} does not match matrix dimension {}",
+            rhs.len(),
+            a.nrows
+        )));
+    }
+    let (perm, inv, kl, ku) = BandedLu::bandwidths(&a);
+    Ok(BandedLu::new(&a, perm, &inv, kl, ku)?.solve(rhs))
+}
+
 /// Solve `A x_k = rhs[k]` for every right-hand side in `rhs` against the
 /// *same* matrix `A`.
 ///
@@ -394,6 +785,27 @@ pub fn solve_multi(coo: &Coo, rhs: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, SparseE
                 "rhs length {} does not match matrix dimension {n}",
                 r.len()
             )));
+        }
+    }
+
+    // Large symmetric systems: try the sparse envelope Cholesky first. It only
+    // succeeds on an SPD matrix (any non-positive pivot is an error), in which
+    // case it is both exact and far cheaper than the dense LU; otherwise fall
+    // through to the dense path below.
+    if n >= SKYLINE_THRESHOLD && csr.is_symmetric(1e-12) {
+        if let Ok(factor) = SkylineFactor::new(&csr) {
+            return rhs.iter().map(|r| factor.solve(r)).collect();
+        }
+    }
+
+    // Large unsymmetric / indefinite systems: banded LU when the reordered band
+    // is narrow enough to be a clear win over the dense `n x n` matrix.
+    if n >= SKYLINE_THRESHOLD {
+        let (perm, inv, kl, ku) = BandedLu::bandwidths(&csr);
+        if (2 * kl + ku + 1) * 4 <= n {
+            if let Ok(lu) = BandedLu::new(&csr, perm, &inv, kl, ku) {
+                return Ok(rhs.iter().map(|r| lu.solve(r)).collect());
+            }
         }
     }
 
@@ -536,6 +948,181 @@ mod tests {
             assert!((x - y).abs() < 1e-7, "{x} vs {y}");
         }
         assert!(cg.relative_residual <= 1e-10);
+    }
+
+    /// 2-D 5-point Laplacian on an `m x m` grid.
+    fn laplacian_2d(m: usize) -> Coo {
+        let mut c = Coo::new();
+        let id = |i: usize, j: usize| i * m + j;
+        for i in 0..m {
+            for j in 0..m {
+                c.push(id(i, j), id(i, j), 4.0);
+                if i + 1 < m {
+                    c.push(id(i, j), id(i + 1, j), -1.0);
+                    c.push(id(i + 1, j), id(i, j), -1.0);
+                }
+                if j + 1 < m {
+                    c.push(id(i, j), id(i, j + 1), -1.0);
+                    c.push(id(i, j + 1), id(i, j), -1.0);
+                }
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn skyline_matches_dense_lu() {
+        let a = laplacian_2d(9);
+        let b: Vec<f64> = (0..81).map(|i| (i as f64 * 0.21).cos() + 2.0).collect();
+        let dense = solve(&a, &b).unwrap();
+        let sky = solve_skyline(&a, &b).unwrap();
+        for (x, y) in dense.iter().zip(&sky) {
+            assert!((x - y).abs() < 1e-10, "{x} vs {y}");
+        }
+    }
+
+    #[test]
+    fn skyline_scales_beyond_dense_lu() {
+        // 120 x 120 = 14 400 unknowns: ~1.6 GB dense, modest for the envelope.
+        let m = 120;
+        let a = laplacian_2d(m);
+        let b = vec![1.0; m * m];
+        let x = solve_skyline(&a, &b).unwrap();
+        let r = a.to_csr().matvec(&x);
+        let err = r
+            .iter()
+            .zip(&b)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0, f64::max);
+        assert!(err < 1e-8, "max residual {err}");
+    }
+
+    #[test]
+    fn skyline_handles_scrambled_ordering_and_rejects_bad_input() {
+        // A permuted tridiagonal matrix: RCM must recover the band.
+        let n = 30;
+        let p: Vec<usize> = (0..n).map(|i| (i * 7) % n).collect();
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(p[i], p[i], 2.0);
+            if i + 1 < n {
+                c.push(p[i], p[i + 1], -1.0);
+                c.push(p[i + 1], p[i], -1.0);
+            }
+        }
+        let b: Vec<f64> = (0..n).map(|i| i as f64 + 1.0).collect();
+        let x = solve_skyline(&c, &b).unwrap();
+        let r = c.to_csr().matvec(&x);
+        assert!(r.iter().zip(&b).all(|(p, q)| (p - q).abs() < 1e-9));
+
+        let mut indef = Coo::new();
+        indef.push(0, 0, 1.0);
+        indef.push(1, 1, -1.0);
+        assert!(solve_skyline(&indef, &[1.0, 1.0]).is_err());
+        assert!(solve_skyline(&laplacian_2d(2), &[1.0]).is_err());
+        assert!(solve_skyline(&Coo::new(), &[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn solve_auto_dispatches_large_spd_and_falls_back_otherwise() {
+        // Large SPD: `solve` should handle 3 600 unknowns quickly (the envelope
+        // path; the dense path would assemble a 3 600 x 3 600 matrix).
+        let m = 60;
+        let a = laplacian_2d(m);
+        let b = vec![1.0; m * m];
+        let x = solve(&a, &b).unwrap();
+        let r = a.to_csr().matvec(&x);
+        assert!(r.iter().zip(&b).all(|(p, q)| (p - q).abs() < 1e-8));
+        assert!(a.to_csr().is_symmetric(1e-12));
+
+        // Large *unsymmetric* tridiagonal system must still be solved correctly
+        // (the skyline path must not silently read only a triangle).
+        let n = 250;
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(i, i, 4.0);
+            if i + 1 < n {
+                c.push(i, i + 1, -1.0);
+                c.push(i + 1, i, -2.0);
+            }
+        }
+        assert!(!c.to_csr().is_symmetric(1e-12));
+        let b: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let x = solve(&c, &b).unwrap();
+        let r = c.to_csr().matvec(&x);
+        assert!(r.iter().zip(&b).all(|(p, q)| (p - q).abs() < 1e-8));
+
+        // Large symmetric *indefinite* system falls back to the dense LU.
+        let mut d = Coo::new();
+        for i in 0..n {
+            d.push(i, i, if i % 2 == 0 { 1.0 } else { -1.0 });
+        }
+        let x = solve(&d, &b).unwrap();
+        assert!((x[1] + 1.0).abs() < 1e-12 && (x[2] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn banded_lu_handles_unsymmetric_indefinite_and_scrambled() {
+        // Unsymmetric, diagonally weak (needs pivoting), scrambled ordering.
+        let n = 120;
+        let p: Vec<usize> = (0..n).map(|i| (i * 37) % n).collect();
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(p[i], p[i], if i % 3 == 0 { 0.1 } else { 3.0 });
+            if i + 1 < n {
+                c.push(p[i], p[i + 1], 2.0);
+                c.push(p[i + 1], p[i], -1.5);
+            }
+            if i + 2 < n {
+                c.push(p[i + 2], p[i], 0.7);
+            }
+        }
+        let b: Vec<f64> = (0..n).map(|i| (i as f64 * 0.3).sin() + 1.0).collect();
+        let x = solve_banded(&c, &b).unwrap();
+        let r = c.to_csr().matvec(&x);
+        assert!(r.iter().zip(&b).all(|(u, v)| (u - v).abs() < 1e-8));
+        let dense = solve(&c, &b).unwrap();
+        assert!(x.iter().zip(&dense).all(|(u, v)| (u - v).abs() < 1e-7));
+
+        // Singular and malformed inputs are errors, not panics.
+        let mut sing = Coo::new();
+        sing.push(0, 0, 1.0);
+        sing.push(1, 0, 1.0);
+        assert!(solve_banded(&sing, &[1.0, 1.0]).is_err());
+        assert!(solve_banded(&c, &[1.0]).is_err());
+        assert!(solve_banded(&Coo::new(), &[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn banded_lu_scales_for_unsymmetric_2d_convection() {
+        // 100 x 100 convection-diffusion stencil (unsymmetric, diagonally
+        // dominant so the system is well conditioned): 10 000 unknowns.
+        let m = 100;
+        let id = |i: usize, j: usize| i * m + j;
+        let mut c = Coo::new();
+        for i in 0..m {
+            for j in 0..m {
+                c.push(id(i, j), id(i, j), 9.0);
+                if i + 1 < m {
+                    c.push(id(i, j), id(i + 1, j), -1.0);
+                    c.push(id(i + 1, j), id(i, j), -1.6);
+                }
+                if j + 1 < m {
+                    c.push(id(i, j), id(i, j + 1), -1.0);
+                    c.push(id(i, j + 1), id(i, j), -1.0);
+                }
+            }
+        }
+        let b = vec![1.0; m * m];
+        // `solve` should take the banded path (dense would need 800 MB).
+        let x = solve(&c, &b).unwrap();
+        let r = c.to_csr().matvec(&x);
+        let err = r
+            .iter()
+            .zip(&b)
+            .map(|(u, v)| (u - v).abs())
+            .fold(0.0, f64::max);
+        assert!(err < 1e-8, "max residual {err}");
     }
 
     #[test]
