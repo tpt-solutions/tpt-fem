@@ -650,10 +650,7 @@ pub fn bytes_to_mesh(bytes: &[u8]) -> Result<Mesh, ExodusError> {
             // this variable's connectivity to `eb_names[0]`'s cell type.
             let suffix = v.name.trim_start_matches("connect");
             let idx: usize = suffix.parse().map_err(|_| {
-                ExodusError::Parse(format!(
-                    "connect variable {} has no numeric suffix",
-                    v.name
-                ))
+                ExodusError::Parse(format!("connect variable {} has no numeric suffix", v.name))
             })?;
             if idx == 0 {
                 return Err(ExodusError::Parse(format!(

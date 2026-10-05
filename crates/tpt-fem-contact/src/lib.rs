@@ -290,7 +290,10 @@ mod tests {
         let load = vec![-4.0];
         let con = ContactConstraint { dof: 0, lower: 0.0 };
         let err = augmented_lagrangian(&base, &load, &[con], 1e4, 1, 1e-12).unwrap_err();
-        assert!(matches!(err, ContactError::NotConverged { .. }), "got {err:?}");
+        assert!(
+            matches!(err, ContactError::NotConverged { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]

@@ -20,7 +20,9 @@ use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
 };
 use tpt_fem_mesh::{CellType, ElementId, Mesh};
-use tpt_fem_quadrature::{tensor_square, triangle, try_gauss_legendre, QuadratureError, TriangleRule};
+use tpt_fem_quadrature::{
+    tensor_square, triangle, try_gauss_legendre, QuadratureError, TriangleRule,
+};
 use tpt_fem_sparse::{solve, Coo, SparseError};
 
 /// Default quadrature order used for boundary-face integration.
@@ -620,7 +622,8 @@ pub fn apply_neumann_order(
             .iter()
             .map(|&n| mesh.node_coords(n).to_vec())
             .collect();
-        let (qpts, qw) = face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
+        let (qpts, qw) =
+            face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
         let refp = ref_nodes(elem.cell_type);
         let dim = phys[0].len();
         let elem_centroid = mean(&phys);
@@ -708,7 +711,8 @@ pub fn apply_robin_order(
             .iter()
             .map(|&n| mesh.node_coords(n).to_vec())
             .collect();
-        let (qpts, qw) = face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
+        let (qpts, qw) =
+            face_quad(f.face, order).map_err(|e| SparseError::Numeric(e.to_string()))?;
         let refp = ref_nodes(elem.cell_type);
         let dim = phys[0].len();
         let elem_centroid = mean(&phys);

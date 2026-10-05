@@ -235,40 +235,41 @@ pub fn fsi_interface_loads(
     let mut loads = vec![0.0; struct_mesh.node_count() * dim];
 
     // Boundary faces of the mesh: a face occurring in exactly one element.
-    let element_faces = |cell: CellType, nodes: &[usize]| -> Result<Vec<Vec<usize>>, CouplingError> {
-        Ok(match cell {
-            CellType::Tri => vec![
-                vec![nodes[0], nodes[1]],
-                vec![nodes[1], nodes[2]],
-                vec![nodes[2], nodes[0]],
-            ],
-            CellType::Quad => vec![
-                vec![nodes[0], nodes[1]],
-                vec![nodes[1], nodes[2]],
-                vec![nodes[2], nodes[3]],
-                vec![nodes[3], nodes[0]],
-            ],
-            CellType::Tet => vec![
-                vec![nodes[0], nodes[1], nodes[2]],
-                vec![nodes[0], nodes[1], nodes[3]],
-                vec![nodes[0], nodes[2], nodes[3]],
-                vec![nodes[1], nodes[2], nodes[3]],
-            ],
-            CellType::Hex => vec![
-                vec![nodes[0], nodes[1], nodes[2], nodes[3]],
-                vec![nodes[4], nodes[5], nodes[6], nodes[7]],
-                vec![nodes[0], nodes[1], nodes[5], nodes[4]],
-                vec![nodes[1], nodes[2], nodes[6], nodes[5]],
-                vec![nodes[2], nodes[3], nodes[7], nodes[6]],
-                vec![nodes[3], nodes[0], nodes[4], nodes[7]],
-            ],
-            other => {
-                return Err(CouplingError::Interface(format!(
-                    "fsi_interface_loads: unsupported cell {other:?}"
-                )))
-            }
-        })
-    };
+    let element_faces =
+        |cell: CellType, nodes: &[usize]| -> Result<Vec<Vec<usize>>, CouplingError> {
+            Ok(match cell {
+                CellType::Tri => vec![
+                    vec![nodes[0], nodes[1]],
+                    vec![nodes[1], nodes[2]],
+                    vec![nodes[2], nodes[0]],
+                ],
+                CellType::Quad => vec![
+                    vec![nodes[0], nodes[1]],
+                    vec![nodes[1], nodes[2]],
+                    vec![nodes[2], nodes[3]],
+                    vec![nodes[3], nodes[0]],
+                ],
+                CellType::Tet => vec![
+                    vec![nodes[0], nodes[1], nodes[2]],
+                    vec![nodes[0], nodes[1], nodes[3]],
+                    vec![nodes[0], nodes[2], nodes[3]],
+                    vec![nodes[1], nodes[2], nodes[3]],
+                ],
+                CellType::Hex => vec![
+                    vec![nodes[0], nodes[1], nodes[2], nodes[3]],
+                    vec![nodes[4], nodes[5], nodes[6], nodes[7]],
+                    vec![nodes[0], nodes[1], nodes[5], nodes[4]],
+                    vec![nodes[1], nodes[2], nodes[6], nodes[5]],
+                    vec![nodes[2], nodes[3], nodes[7], nodes[6]],
+                    vec![nodes[3], nodes[0], nodes[4], nodes[7]],
+                ],
+                other => {
+                    return Err(CouplingError::Interface(format!(
+                        "fsi_interface_loads: unsupported cell {other:?}"
+                    )))
+                }
+            })
+        };
     let mut face_count: std::collections::HashMap<Vec<usize>, usize> =
         std::collections::HashMap::new();
     let mut elem_of_face: std::collections::HashMap<Vec<usize>, usize> =

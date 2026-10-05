@@ -1,0 +1,41 @@
+name: C API
+
+# Keeps the `tpt-fem-capi` crate from silently breaking: builds the cdylib and
+# staticlib, runs the FFI tests, checks the committed cbindgen header is
+# current, and compiles + runs the C example with gcc.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  capi:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/tpt-fem-capi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tpt-fem-capi
+      - name: Build (regenerates include/tpt_fem.h)
+        run: cargo build --release
+      - name: Header is up to date
+        run: git diff --exit-code -- include/tpt_fem.h
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+      - name: Compile and run the C example
+        run: |
+          gcc examples/poisson.c -Iinclude -Ltarget/release -ltpt_fem_capi -lm -o poisson
+          LD_LIBRARY_PATH=target/release ./poisson

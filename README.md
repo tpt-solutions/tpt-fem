@@ -189,7 +189,7 @@ A `Justfile` wraps these (and the `cargo run` examples) for convenience.
 All phases are implemented: Phases 1–4 (core, assembly, first physics,
 structural/nonlinear, ecosystem-gap crates), Phase 5 error ergonomics &
 validation, Phase 6 physics completeness, and Phase 7–8 (CLI, MMS convergence
-suite, fuzz targets, Python bindings).
+suite, fuzz targets, Python bindings), plus a C ABI crate (`tpt-fem-capi`).
 
 ## Examples
 

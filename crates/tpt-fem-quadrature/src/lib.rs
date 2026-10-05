@@ -384,9 +384,7 @@ pub fn tetrahedron(rule: TetrahedronRule) -> Quad3D {
                     [b6, a6, b6],
                     [b6, b6, a6],
                 ],
-                &[
-                    w_centroid, w4, w4, w4, w4, w6, w6, w6, w6, w6, w6,
-                ],
+                &[w_centroid, w4, w4, w4, w4, w6, w6, w6, w6, w6, w6],
             )
         }
     };
@@ -637,7 +635,10 @@ mod tests {
     fn every_rule_stays_inside_its_reference_element() {
         for order in 1..=5 {
             for p in gauss_legendre(order).points {
-                assert!((-1.0..=1.0).contains(&p), "gauss_legendre({order}) point {p}");
+                assert!(
+                    (-1.0..=1.0).contains(&p),
+                    "gauss_legendre({order}) point {p}"
+                );
             }
             for p in gauss_legendre_unit(order).points {
                 assert!(
@@ -646,7 +647,11 @@ mod tests {
                 );
             }
         }
-        for rule in [TriangleRule::Degree1, TriangleRule::Degree2, TriangleRule::HammerStroud] {
+        for rule in [
+            TriangleRule::Degree1,
+            TriangleRule::Degree2,
+            TriangleRule::HammerStroud,
+        ] {
             for p in triangle(rule).points {
                 assert!(
                     p[0] >= -1e-12 && p[1] >= -1e-12 && p[0] + p[1] <= 1.0 + 1e-12,

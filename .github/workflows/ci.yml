@@ -5,10 +5,6 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  # Nightly run so the heavy `#[ignore]`d 3-D MMS convergence test
-  # (`mms_3d_converges`) actually executes instead of never running in CI.
-  schedule:
-    - cron: "17 4 * * *"
   workflow_dispatch:
 
 env:
@@ -146,12 +142,12 @@ jobs:
           done
 
   # Actually execute the fuzz targets (the `fuzz-build` job only compiles them).
-  # Runs on the nightly schedule / manual dispatch, with the corpus and crash
-  # artifacts cached between runs so seeds and findings accumulate. Each target
-  # gets a bounded wall-clock budget.
+  # Runs on manual dispatch only (run it before releases), with the corpus and
+  # crash artifacts cached between runs so seeds and findings accumulate. Each
+  # target gets a bounded wall-clock budget.
   fuzz-run:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -189,7 +185,7 @@ jobs:
           command: check
 
   # Heavy `#[ignore]`d 3-D MMS convergence test (`mms_3d_converges`) — runs on
-  # the nightly schedule (and manually) rather than in the fast `test` job, so
+  # push/PR (and manually) in its own job rather than in the fast `test` job, so
   # it actually gets exercised instead of bit-rotting.
   mms-3d:
     runs-on: ubuntu-latest

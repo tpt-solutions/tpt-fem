@@ -4,9 +4,9 @@ name: Python bindings
 # changes: builds the wheel with maturin and runs the pytest suite.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 env:

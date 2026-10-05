@@ -1198,3 +1198,18 @@ pass. Everything else below is tracked for a future pass, not implemented.*
       `Mesh` model, exports solution + mesh as ParaView `.vtk`, and prints an
       elements/nodes/error/time report. Covered by
       `amr_runs_and_writes_vtk` and `amr_rejects_invalid_theta`.
+
+## Phase 15 — C API (2026-10-05)
+
+- [x] **Done: `crates/tpt-fem-capi`** — C ABI (`cdylib` + `staticlib`) mirroring the
+      Python bindings, with a cbindgen-generated `include/tpt_fem.h`: mesh
+      (`tpt_mesh_load`/`_box`/`_coords`/`_nodes_on_plane`/`_nodes_in_box`/`_write_vtk`),
+      `tpt_solve_poisson` (constant or C-callback source), `tpt_solve_elasticity`,
+      `tpt_solve_modal`, `tpt_topopt_cantilever`. Opaque handles + `tpt_*_free`,
+      `int32_t` status codes, thread-local `tpt_last_error_message()`, panics
+      caught at the boundary. Excluded from the workspace like py/wasm;
+      `publish = false`; covered by `tests/ffi.rs`, `examples/poisson.c` and
+      `.github/workflows/capi.yml` (build, header-drift check, clippy, tests, gcc example).
+- [ ] C API follow-ups: release artifacts (Linux/macOS/Windows) via
+      `workflow_dispatch`; extend coverage beyond Python parity (thermal
+      transient, dynamics, AMR); per-language wrappers (Julia/R/.NET) over this ABI.

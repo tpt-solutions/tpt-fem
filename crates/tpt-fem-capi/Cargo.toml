@@ -1,0 +1,26 @@
+[package]
+name = "tpt-fem-capi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["TPT Solutions"]
+description = "C ABI bindings for the tpt-fem core (cdylib + staticlib, cbindgen header; dev-only this pass)."
+repository = "https://github.com/tpt-solutions/tpt-fem"
+homepage = "https://github.com/tpt-solutions/tpt-fem"
+readme = "README.md"
+publish = false
+
+[lib]
+name = "tpt_fem_capi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+tpt-fem = { version = "0.1.0", path = "../tpt-fem", features = ["topopt"] }
+
+[build-dependencies]
+cbindgen = { version = "0.27", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
