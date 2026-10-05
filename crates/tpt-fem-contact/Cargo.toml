@@ -13,10 +13,7 @@ keywords = ["finite-element", "fem", "contact", "penalty", "augmented-lagrangian
 categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
-tpt-fem-assembly = { workspace = true }
 tpt-fem-sparse = { workspace = true }
-tpt-fem-mesh = { workspace = true }
-tpt-fem-dofmap = { workspace = true }
 
 [features]
 default = []

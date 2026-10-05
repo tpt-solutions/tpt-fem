@@ -1176,9 +1176,6 @@ version = "0.1.1"
 name = "tpt-fem-contact"
 version = "0.2.0"
 dependencies = [
- "tpt-fem-assembly",
- "tpt-fem-dofmap",
- "tpt-fem-mesh",
  "tpt-fem-sparse",
 ]
 
@@ -1187,8 +1184,6 @@ name = "tpt-fem-coupling"
 version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
- "tpt-fem-dofmap",
- "tpt-fem-dynamic",
  "tpt-fem-elasticity",
  "tpt-fem-element",
  "tpt-fem-fluid",
@@ -1209,10 +1204,7 @@ dependencies = [
 name = "tpt-fem-dynamic"
 version = "0.2.0"
 dependencies = [
- "tpt-fem-assembly",
  "tpt-fem-eigen",
- "tpt-fem-elasticity",
- "tpt-fem-mesh",
  "tpt-fem-sparse",
 ]
 
@@ -1252,7 +1244,6 @@ dependencies = [
  "tpt-fem-element",
  "tpt-fem-mesh",
  "tpt-fem-quadrature",
- "tpt-fem-solve",
  "tpt-fem-sparse",
 ]
 
@@ -1326,8 +1317,6 @@ name = "tpt-fem-porous"
 version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
- "tpt-fem-dofmap",
- "tpt-fem-dynamic",
  "tpt-fem-element",
  "tpt-fem-mesh",
  "tpt-fem-quadrature",
@@ -1372,9 +1361,7 @@ name = "tpt-fem-topopt"
 version = "0.1.1"
 dependencies = [
  "tpt-fem-assembly",
- "tpt-fem-elasticity",
  "tpt-fem-element",
- "tpt-fem-mesh",
  "tpt-fem-quadrature",
  "tpt-fem-sparse",
 ]
