@@ -221,12 +221,150 @@ impl Csr {
 /// **not** scale to large sparse problems. For those, enable the optional
 /// `russell` feature (which dispatches to the `russell_sparse`
 /// UMFPACK/MUMPS direct solvers) — see `solve_russell`. As a rule of thumb,
-/// prefer `russell` once `A` has more than a few thousand rows.
+/// prefer `russell` once `A` has more than a few thousand rows, or [`solve_cg`]
+/// (pure Rust, `O(nnz)`) when `A` is symmetric positive-definite.
 pub fn solve(coo: &Coo, rhs: &[f64]) -> Result<Vec<f64>, SparseError> {
     let sols = solve_multi(coo, std::slice::from_ref(&rhs.to_vec()))?;
     sols.into_iter()
         .next()
         .ok_or_else(|| SparseError::Numeric("solve received an empty right-hand side".into()))
+}
+
+/// Options for the iterative [`solve_cg`] solver.
+#[derive(Clone, Copy, Debug)]
+pub struct CgOptions {
+    /// Relative residual tolerance: stop when `‖r‖ ≤ tol · ‖b‖`.
+    pub tol: f64,
+    /// Maximum number of iterations (`0` means `10 · n`).
+    pub max_iter: usize,
+}
+
+impl Default for CgOptions {
+    fn default() -> Self {
+        CgOptions {
+            tol: 1e-10,
+            max_iter: 0,
+        }
+    }
+}
+
+/// Result of a successful [`solve_cg`].
+#[derive(Clone, Debug)]
+pub struct CgSolution {
+    /// The solution vector.
+    pub x: Vec<f64>,
+    /// Iterations taken.
+    pub iterations: usize,
+    /// Final relative residual `‖r‖ / ‖b‖` (absolute `‖r‖` if `b = 0`).
+    pub relative_residual: f64,
+}
+
+/// Solve the **symmetric positive-definite** system `A x = b` with
+/// Jacobi-preconditioned conjugate gradients.
+///
+/// Unlike [`solve`] this works on the CSR form directly — `O(nnz)` memory and
+/// `O(nnz)` work per iteration — so it scales to systems far larger than the
+/// dense-LU backend allows, without any external toolchain. `A` must be SPD
+/// (e.g. a Dirichlet-reduced stiffness matrix); for indefinite or
+/// unsymmetric systems use [`solve`] or the `russell` backend. Returns
+/// [`SparseError::Numeric`] if the matrix is not square, a diagonal entry is
+/// non-positive, the iteration breaks down (non-SPD input), or it does not
+/// reach `opts.tol` within `opts.max_iter` iterations.
+pub fn solve_cg(coo: &Coo, rhs: &[f64], opts: &CgOptions) -> Result<CgSolution, SparseError> {
+    let a = coo.to_csr();
+    let n = a.nrows;
+    if a.ncols != n {
+        return Err(SparseError::Numeric(format!(
+            "solve_cg requires a square matrix, got {n} x {}",
+            a.ncols
+        )));
+    }
+    if rhs.len() != n {
+        return Err(SparseError::Numeric(format!(
+            "rhs length {} does not match matrix dimension {n}",
+            rhs.len()
+        )));
+    }
+    if !(opts.tol.is_finite() && opts.tol > 0.0) {
+        return Err(SparseError::Numeric(format!(
+            "solve_cg tolerance must be finite and positive (got {})",
+            opts.tol
+        )));
+    }
+
+    // Jacobi preconditioner M⁻¹ = diag(A)⁻¹.
+    let mut inv_diag = vec![0.0; n];
+    for r in 0..n {
+        let mut d = 0.0;
+        for c in a.row_ptrs[r]..a.row_ptrs[r + 1] {
+            if a.col_ind[c] == r {
+                d += a.values[c];
+            }
+        }
+        if !(d.is_finite() && d > 0.0) {
+            return Err(SparseError::Numeric(format!(
+                "solve_cg requires a positive diagonal (row {r} has {d})"
+            )));
+        }
+        inv_diag[r] = 1.0 / d;
+    }
+
+    let dot = |u: &[f64], v: &[f64]| u.iter().zip(v).map(|(a, b)| a * b).sum::<f64>();
+    let bnorm = dot(rhs, rhs).sqrt();
+    let scale = if bnorm > 0.0 { bnorm } else { 1.0 };
+    let max_iter = if opts.max_iter == 0 {
+        10 * n.max(1)
+    } else {
+        opts.max_iter
+    };
+
+    let mut x = vec![0.0; n];
+    let mut r = rhs.to_vec();
+    let mut res = dot(&r, &r).sqrt() / scale;
+    if res <= opts.tol {
+        return Ok(CgSolution {
+            x,
+            iterations: 0,
+            relative_residual: res,
+        });
+    }
+    let mut z: Vec<f64> = r.iter().zip(&inv_diag).map(|(r, m)| r * m).collect();
+    let mut p = z.clone();
+    let mut rz = dot(&r, &z);
+    for it in 1..=max_iter {
+        let ap = a.matvec(&p);
+        let pap = dot(&p, &ap);
+        if !(pap.is_finite() && pap > 0.0) {
+            return Err(SparseError::Numeric(
+                "solve_cg broke down: matrix is not positive-definite".into(),
+            ));
+        }
+        let alpha = rz / pap;
+        for i in 0..n {
+            x[i] += alpha * p[i];
+            r[i] -= alpha * ap[i];
+        }
+        res = dot(&r, &r).sqrt() / scale;
+        if res <= opts.tol {
+            return Ok(CgSolution {
+                x,
+                iterations: it,
+                relative_residual: res,
+            });
+        }
+        for i in 0..n {
+            z[i] = r[i] * inv_diag[i];
+        }
+        let rz_new = dot(&r, &z);
+        let beta = rz_new / rz;
+        rz = rz_new;
+        for i in 0..n {
+            p[i] = z[i] + beta * p[i];
+        }
+    }
+    Err(SparseError::Numeric(format!(
+        "solve_cg did not converge in {max_iter} iterations (relative residual {res:e})"
+    )))
 }
 
 /// Solve `A x_k = rhs[k]` for every right-hand side in `rhs` against the
@@ -373,6 +511,69 @@ pub use russell::{solve_russell, solve_russell_multi};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 1-D Laplacian (tridiagonal 2/-1) with `n` unknowns.
+    fn laplacian_1d(n: usize) -> Coo {
+        let mut c = Coo::new();
+        for i in 0..n {
+            c.push(i, i, 2.0);
+            if i + 1 < n {
+                c.push(i, i + 1, -1.0);
+                c.push(i + 1, i, -1.0);
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn cg_matches_dense_lu() {
+        let n = 40;
+        let a = laplacian_1d(n);
+        let b: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).sin() + 1.0).collect();
+        let direct = solve(&a, &b).unwrap();
+        let cg = solve_cg(&a, &b, &CgOptions::default()).unwrap();
+        for (x, y) in direct.iter().zip(&cg.x) {
+            assert!((x - y).abs() < 1e-7, "{x} vs {y}");
+        }
+        assert!(cg.relative_residual <= 1e-10);
+    }
+
+    #[test]
+    fn cg_scales_beyond_dense_lu() {
+        // 4 000 unknowns is already ~128 MB as a dense matrix and O(n³) to factor.
+        let n = 4_000;
+        let a = laplacian_1d(n);
+        let b = vec![1.0; n];
+        let opts = CgOptions {
+            tol: 1e-8,
+            max_iter: 0,
+        };
+        let cg = solve_cg(&a, &b, &opts).unwrap();
+        // Residual check against the original system.
+        let r = a.to_csr().matvec(&cg.x);
+        let err = r
+            .iter()
+            .zip(&b)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0, f64::max);
+        assert!(err < 1e-3, "max residual {err}");
+    }
+
+    #[test]
+    fn cg_rejects_bad_input() {
+        let a = laplacian_1d(3);
+        assert!(solve_cg(&a, &[1.0, 2.0], &CgOptions::default()).is_err());
+        let mut neg = Coo::new();
+        neg.push(0, 0, -1.0);
+        assert!(solve_cg(&neg, &[1.0], &CgOptions::default()).is_err());
+        let tiny = CgOptions {
+            tol: 1e-14,
+            max_iter: 2,
+        };
+        assert!(solve_cg(&laplacian_1d(50), &vec![1.0; 50], &tiny).is_err());
+        let zero = solve_cg(&a, &[0.0; 3], &CgOptions::default()).unwrap();
+        assert_eq!(zero.iterations, 0);
+    }
 
     #[test]
     fn coo_sums_duplicates_and_sorts() {

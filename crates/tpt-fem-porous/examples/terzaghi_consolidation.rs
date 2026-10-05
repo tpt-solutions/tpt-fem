@@ -48,7 +48,7 @@ fn main() {
     // Largest target time factor -> total time.
     let tv_max = 1.0;
     let total = tv_max * h * h / cv; // = 10.0
-    let hist = terzaghi_consolidation(&mesh, q0, cv, ev, total, dt);
+    let hist = terzaghi_consolidation(&mesh, q0, cv, ev, total, dt).expect("consolidation");
 
     let s_inf = q0 * h / ev; // closed-form drained settlement
     let targets = [0.2_f64, 0.5, 1.0];

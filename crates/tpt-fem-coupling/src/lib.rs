@@ -36,8 +36,8 @@ use tpt_fem_elasticity::{elasticity_element_matrix, ElasticModel, ElasticityErro
 use tpt_fem_element::{Hex8, Line2, Map, Quad4, ReferenceElement, Tet4, Tri3};
 use tpt_fem_mesh::{CellType, Mesh};
 use tpt_fem_quadrature::{
-    gauss_legendre, tensor_cube, tensor_square, tetrahedron, triangle, TetrahedronRule,
-    TriangleRule,
+    tensor_cube, tensor_square, tetrahedron, triangle, try_gauss_legendre, QuadratureError,
+    TetrahedronRule, TriangleRule,
 };
 use tpt_fem_sparse::SparseError;
 
@@ -57,6 +57,8 @@ pub enum CouplingError {
     /// does not cover every structure node it claims to (e.g. a partial or
     /// asymmetric `interface` list).
     Interface(String),
+    /// The requested quadrature order is outside the supported range.
+    Quadrature(QuadratureError),
 }
 
 impl std::fmt::Display for CouplingError {
@@ -66,11 +68,18 @@ impl std::fmt::Display for CouplingError {
             CouplingError::Elasticity(e) => write!(f, "coupling elasticity operator failed: {e}"),
             CouplingError::Fluid(e) => write!(f, "coupling fluid solve failed: {e}"),
             CouplingError::Interface(m) => write!(f, "coupling interface error: {m}"),
+            CouplingError::Quadrature(e) => write!(f, "coupling quadrature error: {e}"),
         }
     }
 }
 
 impl std::error::Error for CouplingError {}
+
+impl From<QuadratureError> for CouplingError {
+    fn from(e: QuadratureError) -> Self {
+        CouplingError::Quadrature(e)
+    }
+}
 
 impl From<SparseError> for CouplingError {
     fn from(e: SparseError) -> Self {
@@ -210,7 +219,11 @@ pub fn fsi_interface_loads(
     interface: &[(usize, usize)],
     fluid_pressure: &[f64],
 ) -> Result<Vec<f64>, CouplingError> {
-    let dim = match struct_mesh.elements[0].cell_type {
+    let first = struct_mesh
+        .elements
+        .first()
+        .ok_or_else(|| CouplingError::Interface("fsi_interface_loads: empty mesh".into()))?;
+    let dim = match first.cell_type {
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
         other => {
@@ -660,7 +673,7 @@ fn ref_shape_grad(cell: CellType, xi: &[f64]) -> Result<(Vec<f64>, Vec<Vec<f64>>
 fn ref_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), CouplingError> {
     Ok(match cell {
         CellType::Line => {
-            let r = gauss_legendre(order);
+            let r = try_gauss_legendre(order)?;
             (r.points.iter().map(|x| vec![*x]).collect(), r.weights)
         }
         CellType::Tri => {
@@ -668,7 +681,7 @@ fn ref_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), C
             (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
         }
         CellType::Quad => {
-            let r = tensor_square(&gauss_legendre(order));
+            let r = tensor_square(&try_gauss_legendre(order)?);
             (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
         }
         CellType::Tet => {
@@ -676,7 +689,7 @@ fn ref_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), C
             (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
         }
         CellType::Hex => {
-            let r = tensor_cube(&gauss_legendre(order));
+            let r = tensor_cube(&try_gauss_legendre(order)?);
             (r.points.iter().map(|p| p.to_vec()).collect(), r.weights)
         }
         other => {
@@ -1003,5 +1016,21 @@ mod tests {
         let pressure = vec![1.0_f64; 2];
         let err = fsi_interface_loads(&mesh, &interface, &pressure).unwrap_err();
         assert!(matches!(err, CouplingError::Interface(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn fsi_interface_loads_errors_on_empty_mesh() {
+        let mesh = MeshBuilder::new().build();
+        let err = fsi_interface_loads(&mesh, &[], &[]).unwrap_err();
+        assert!(matches!(err, CouplingError::Interface(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn ref_quad_rejects_out_of_range_order() {
+        assert!(matches!(
+            ref_quad(CellType::Quad, 9),
+            Err(CouplingError::Quadrature(_))
+        ));
+        assert!(ref_quad(CellType::Quad, 2).is_ok());
     }
 }

@@ -149,9 +149,7 @@ fn nearest_in(node: &OctNode, q: &[f64], best: &mut Option<(usize, f64)>) {
         Some(children) => {
             let mut order: Vec<usize> = (0..children.len()).collect();
             order.sort_by(|&a, &b| {
-                bbox_min_dist(q, &children[a])
-                    .partial_cmp(&bbox_min_dist(q, &children[b]))
-                    .unwrap()
+                bbox_min_dist(q, &children[a]).total_cmp(&bbox_min_dist(q, &children[b]))
             });
             for ci in order {
                 let c = &children[ci];

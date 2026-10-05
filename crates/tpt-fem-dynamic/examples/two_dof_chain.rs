@@ -48,7 +48,8 @@ fn main() {
         |_| vec![0.0, 0.0],
         &opts,
         nsteps,
-    );
+    )
+    .unwrap();
 
     let (t, u) = hist[nsteps].clone();
     let sq2 = 2.0_f64.sqrt();

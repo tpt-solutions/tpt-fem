@@ -88,7 +88,8 @@ fn main() {
         beta: 0.25,
         gamma: 0.5,
     };
-    let hist = transient_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, penalty, &opts, nsteps);
+    let hist = transient_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, penalty, &opts, nsteps)
+        .expect("transient solve");
 
     println!("Stokes start-up flow: {n} x {n} Quad4, G = {g}, mu = {mu}, penalty = {penalty:.0e}");
     println!("steady_stokes centre u_x = {steady_centre:.6}");

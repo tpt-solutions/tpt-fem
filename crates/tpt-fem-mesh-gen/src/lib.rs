@@ -578,13 +578,11 @@ pub fn tet_quality(mesh: &Mesh) -> TetQuality {
         let edges = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
         for (i, j) in edges {
             // Each edge (i,j) of the tet is shared by exactly two of the four
-            // faces {0,1,2,3}. Excluding the two face indices `i`/`j` from the
-            // four always leaves two, so both `find`s succeed. Contracted
-            // precondition (mirrors the `mat_det`/`mat_inv` treatment,
-            // Phase 9b/10a; see `todo.md` 11b).
-            debug_assert!((0..4).filter(|&f| f != i && f != j).count() == 2);
-            let f1 = (0..4).find(|&f| f != i && f != j).unwrap();
-            let f2 = (0..4).find(|&f| f != i && f != j && f != f1).unwrap();
+            // faces {0,1,2,3}: excluding `i` and `j` always leaves two.
+            let mut shared = (0..4).filter(|&f| f != i && f != j);
+            let (Some(f1), Some(f2)) = (shared.next(), shared.next()) else {
+                continue;
+            };
             let (n1, n2) = (norms[f1], norms[f2]);
             let dot = n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2];
             let l1 = (n1[0].powi(2) + n1[1].powi(2) + n1[2].powi(2)).sqrt();

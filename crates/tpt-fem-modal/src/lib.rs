@@ -29,7 +29,7 @@
 //! assert!((amp - 1.0 / 3.0).abs() < 1e-4);
 //! ```
 
-use tpt_fem_dynamic::{newmark, NewmarkOptions};
+use tpt_fem_dynamic::{newmark, DynamicError, NewmarkOptions};
 use tpt_fem_eigen::{generalized_lanczos_eigs, matvec};
 use tpt_fem_sparse::{Coo, SparseError};
 
@@ -158,7 +158,7 @@ impl ModalData {
         f: &F,
         opts: &NewmarkOptions,
         nsteps: usize,
-    ) -> Vec<(f64, Vec<f64>)>
+    ) -> Result<Vec<(f64, Vec<f64>)>, DynamicError>
     where
         F: Fn(f64) -> Vec<f64>,
     {
@@ -211,7 +211,7 @@ impl ModalData {
                     .map(|(a, b)| a * b)
                     .sum::<f64>()]
             };
-            let hist = newmark(&mm, &cc, &kk, &[q0[i]], &[qd0[i]], fi, opts, nsteps);
+            let hist = newmark(&mm, &cc, &kk, &[q0[i]], &[qd0[i]], fi, opts, nsteps)?;
             q_hist.push(hist);
         }
         // Recombine into the physical response.
@@ -228,7 +228,7 @@ impl ModalData {
             }
             out.push((t, u));
         }
-        out
+        Ok(out)
     }
 }
 
@@ -276,7 +276,9 @@ mod tests {
             gamma: 0.5,
         };
         let nsteps = 400; // t = 2.0
-        let hist = data.modal_superposition(&[1.0], &[0.0], &|_| vec![0.0], &opts, nsteps);
+        let hist = data
+            .modal_superposition(&[1.0], &[0.0], &|_| vec![0.0], &opts, nsteps)
+            .unwrap();
         let (t, u) = &hist[nsteps];
         let want = (2.0 * t).cos();
         assert!((u[0] - want).abs() < 5e-3, "got {} want {}", u[0], want);

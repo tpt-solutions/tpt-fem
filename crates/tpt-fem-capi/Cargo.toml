@@ -2,7 +2,7 @@
 name = "tpt-fem-capi"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 authors = ["TPT Solutions"]
 description = "C ABI bindings for the tpt-fem core (cdylib + staticlib, cbindgen header; dev-only this pass)."

@@ -43,3 +43,27 @@ mms-3d:
 # Build the command-line driver.
 cli:
     cargo build -p tpt-fem-cli
+
+# Verify the excluded crates (py/capi/wasm) pin the workspace's tpt-fem* versions.
+pins:
+    python3 scripts/check_pins.py
+
+# Verify every crate whose src/ changed vs a base ref also updated its CHANGELOG.
+changelogs base="origin/master":
+    scripts/check_changelogs.sh {{base}}
+
+# Check the declared MSRV (keep in sync with rust-version in Cargo.toml).
+msrv:
+    cargo +1.85.0 check --workspace --all-targets
+
+# Validate every publishable crate's package contents.
+package:
+    for d in crates/tpt-fem*/; do n=$(basename $d); case $n in tpt-fem-py|tpt-fem-capi|tpt-fem-wasm) continue;; esac; cargo package -p $n --list --allow-dirty > /dev/null || exit 1; done
+
+# Every gate in PUBLISHING.md that can run locally, before the first `cargo publish`.
+release-check: verify pins msrv package
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+    cargo test -p tpt-fem --test manifest_drift
+    cargo build --manifest-path crates/tpt-fem-capi/Cargo.toml
+    cargo check --manifest-path crates/tpt-fem-py/Cargo.toml
+    cargo check --manifest-path crates/tpt-fem-wasm/Cargo.toml --target wasm32-unknown-unknown

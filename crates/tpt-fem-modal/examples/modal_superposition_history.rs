@@ -39,7 +39,9 @@ fn main() {
         gamma: 0.5,
     };
     let nsteps = 1000; // simulate t ∈ [0, 2]
-    let hist = data.modal_superposition(&u0, &[0.0, 0.0], &|_| vec![0.0; 2], &opts, nsteps);
+    let hist = data
+        .modal_superposition(&u0, &[0.0, 0.0], &|_| vec![0.0; 2], &opts, nsteps)
+        .expect("modal history");
 
     // Analytic free vibration: u(t) = Σ_i φ_i · (φᵀ M u₀ / m_i) · cos(ω_i t).
     // The modes are unnormalized, so project explicitly with the stored modal

@@ -30,7 +30,6 @@ ignore = [
     # safety.
     "RUSTSEC-2022-0104", # structopt in maintenance mode
     "RUSTSEC-2021-0139", # ansi_term unmaintained (via clap 2)
-    "RUSTSEC-2024-0375", # atty unmaintained (via clap 2)
     "RUSTSEC-2024-0370", # proc-macro-error unmaintained (via structopt derive)
 ]
 

@@ -205,8 +205,11 @@ fn main() {
         load.clone(),
         &opts,
         nsteps,
-    );
-    let hist_modal = data.modal_superposition(&zero, &zero, &load, &opts, nsteps);
+    )
+    .expect("newmark");
+    let hist_modal = data
+        .modal_superposition(&zero, &zero, &load, &opts, nsteps)
+        .expect("modal superposition");
 
     println!("\ntip displacement history (step load {f0:.0} N):");
     println!(

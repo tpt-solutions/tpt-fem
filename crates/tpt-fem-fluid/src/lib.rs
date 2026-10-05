@@ -98,6 +98,13 @@ pub enum FluidError {
         /// Final relative change between successive Picard iterates.
         residual: f64,
     },
+    /// The mesh contains no elements.
+    EmptyMesh,
+    /// The mesh contains a cell type the mixed velocity/pressure elements do not
+    /// support (only linear `Line`/`Tri`/`Quad`/`Tet`/`Hex` cells).
+    UnsupportedCell(CellType),
+    /// The Newmark time integration failed.
+    Dynamic(tpt_fem_dynamic::DynamicError),
 }
 
 impl std::fmt::Display for FluidError {
@@ -113,11 +120,39 @@ impl std::fmt::Display for FluidError {
                 "Navier-Stokes Picard iteration did not converge at step {step} \
                  after {iterations} iterations (relative change {residual:e})"
             ),
+            FluidError::EmptyMesh => write!(f, "fluid mesh has no elements"),
+            FluidError::UnsupportedCell(c) => {
+                write!(f, "fluid: unsupported cell type {c:?} (linear cells only)")
+            }
+            FluidError::Dynamic(e) => write!(f, "fluid time integration failed: {e}"),
         }
     }
 }
 
 impl std::error::Error for FluidError {}
+
+impl From<tpt_fem_dynamic::DynamicError> for FluidError {
+    fn from(e: tpt_fem_dynamic::DynamicError) -> Self {
+        FluidError::Dynamic(e)
+    }
+}
+
+/// Checks that `mesh` is non-empty and made only of supported linear cells.
+///
+/// Every public entry point calls this first; the private assembly helpers
+/// rely on it and treat an unsupported cell as an internal invariant violation.
+fn validate_mesh(mesh: &Mesh) -> Result<(), FluidError> {
+    if mesh.elements.is_empty() {
+        return Err(FluidError::EmptyMesh);
+    }
+    for e in &mesh.elements {
+        match e.cell_type {
+            CellType::Line | CellType::Tri | CellType::Quad | CellType::Tet | CellType::Hex => {}
+            other => return Err(FluidError::UnsupportedCell(other)),
+        }
+    }
+    Ok(())
+}
 
 impl From<SparseError> for FluidError {
     fn from(e: SparseError) -> Self {
@@ -130,7 +165,8 @@ impl From<SparseError> for FluidError {
 /// The penalty method solves for the velocity field only and recovers the
 /// pressure afterwards, but the map is provided for callers that want a single
 /// field descriptor covering both quantities.
-pub fn stokes_dofmap(mesh: &Mesh) -> tpt_fem_dofmap::MultiFieldDofMap {
+pub fn stokes_dofmap(mesh: &Mesh) -> Result<tpt_fem_dofmap::MultiFieldDofMap, FluidError> {
+    validate_mesh(mesh)?;
     let dim = match mesh.elements[0].cell_type {
         CellType::Line => Line2::DIM,
         CellType::Tri => Tri3::DIM,
@@ -139,14 +175,14 @@ pub fn stokes_dofmap(mesh: &Mesh) -> tpt_fem_dofmap::MultiFieldDofMap {
         CellType::Hex => Hex8::DIM,
         other => panic!("fluid: unsupported cell {other:?}"),
     };
-    tpt_fem_dofmap::MultiFieldDofMap::new(
+    Ok(tpt_fem_dofmap::MultiFieldDofMap::new(
         mesh,
         &[
             tpt_fem_dofmap::FieldSpec::new("velocity", dim),
             tpt_fem_dofmap::FieldSpec::new("pressure", 1),
         ],
         tpt_fem_dofmap::Layout::Interleaved,
-    )
+    ))
 }
 
 fn quad_points(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>) {
@@ -413,6 +449,7 @@ pub fn steady_stokes(
     velocity_bc: &[(usize, f64)],
     penalty: f64,
 ) -> Result<(Vec<f64>, Vec<f64>), FluidError> {
+    validate_mesh(mesh)?;
     let (k, _mass, rhs, dim) = assemble_fluid(mesh, viscosity, penalty, &body_force, velocity_bc);
     let sol = solve_with_dirichlet(&k, &rhs, &[])?;
     let nvel = mesh.node_count() * dim;
@@ -499,7 +536,8 @@ pub fn transient_stokes(
     penalty: f64,
     opts: &NewmarkOptions,
     nsteps: usize,
-) -> Vec<(f64, Vec<f64>)> {
+) -> Result<Vec<(f64, Vec<f64>)>, FluidError> {
+    validate_mesh(mesh)?;
     let bf = |x: &[f64]| body_force(0.0, x);
     let (k, mass, rhs_free, dim) = assemble_fluid(mesh, viscosity, penalty, &bf, velocity_bc);
     let nfree = rhs_free.len();
@@ -514,7 +552,7 @@ pub fn transient_stokes(
         move |_| rhs_free.clone(),
         opts,
         nsteps,
-    );
+    )?;
     let nvel = mesh.node_count() * dim;
     let dt = opts.dt;
     let mut out = Vec::with_capacity(hist.len());
@@ -538,7 +576,7 @@ pub fn transient_stokes(
         }
         out.push((*t, u));
     }
-    out
+    Ok(out)
 }
 
 /// Low-Reynolds-number Navier–Stokes via Picard iteration of the convective term
@@ -578,6 +616,7 @@ pub fn transient_navier_stokes(
     nsteps: usize,
     picard_iters: usize,
 ) -> Result<Vec<f64>, FluidError> {
+    validate_mesh(mesh)?;
     let order = 2;
     let dim = match mesh.elements[0].cell_type {
         CellType::Line => Line2::DIM,
@@ -822,6 +861,29 @@ mod tests {
 
     // Prescribe the analytic Poiseuille profile on the *boundary* only; the
     // penalty-Stokes solve then reproduces it in the interior (a patch test).
+    #[test]
+    fn rejects_empty_and_unsupported_meshes_instead_of_panicking() {
+        let empty = MeshBuilder::new().build();
+        assert!(matches!(
+            steady_stokes(&empty, 1.0, |_| vec![0.0, 0.0], &[], 1e6),
+            Err(FluidError::EmptyMesh)
+        ));
+        assert!(matches!(stokes_dofmap(&empty), Err(FluidError::EmptyMesh)));
+
+        let mut b = MeshBuilder::new();
+        let ids: Vec<usize> = (0..6).map(|i| b.add_node(vec![i as f64, 0.0])).collect();
+        b.add_element(CellType::Tri6, ids);
+        let p2 = b.build();
+        assert!(matches!(
+            steady_stokes(&p2, 1.0, |_| vec![0.0, 0.0], &[], 1e6),
+            Err(FluidError::UnsupportedCell(CellType::Tri6))
+        ));
+        assert!(matches!(
+            stokes_dofmap(&p2),
+            Err(FluidError::UnsupportedCell(CellType::Tri6))
+        ));
+    }
+
     fn poiseuille_bc(mesh: &Mesh, g: f64, mu: f64) -> Vec<(usize, f64)> {
         let mut bc = Vec::new();
         for n in 0..mesh.node_count() {
@@ -920,7 +982,7 @@ mod tests {
             beta: 0.25,
             gamma: 0.5,
         };
-        let hist = transient_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, 1e3, &opts, 600);
+        let hist = transient_stokes(&mesh, mu, |_, _| vec![g, 0.0], &bc, 1e3, &opts, 600).unwrap();
         let final_u = &hist.last().unwrap().1;
         let center: Vec<f64> = (0..mesh.node_count())
             .filter(|&n| (mesh.node_coords(n)[1] - 0.5).abs() < 1e-9)

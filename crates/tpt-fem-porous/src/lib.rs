@@ -69,6 +69,64 @@ fn cell_scalar(cell: CellType, order: usize) -> (Vec<Vec<f64>>, Vec<f64>, usize)
     }
 }
 
+/// Errors returned by the porous-media solvers.
+#[derive(Debug)]
+pub enum PorousError {
+    /// The underlying linear solve failed.
+    Sparse(tpt_fem_sparse::SparseError),
+    /// The mesh contains no elements.
+    EmptyMesh,
+    /// The mesh contains a cell type the scalar-field elements do not support
+    /// (only linear `Line`/`Tri`/`Quad`/`Tet`/`Hex` cells).
+    UnsupportedCell(CellType),
+    /// A caller-supplied parameter or mesh layout is invalid.
+    InvalidInput(String),
+}
+
+impl std::fmt::Display for PorousError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PorousError::Sparse(e) => write!(f, "porous solve failed: {e}"),
+            PorousError::EmptyMesh => write!(f, "porous mesh has no elements"),
+            PorousError::UnsupportedCell(c) => {
+                write!(f, "porous: unsupported cell type {c:?} (linear cells only)")
+            }
+            PorousError::InvalidInput(m) => write!(f, "porous: invalid input: {m}"),
+        }
+    }
+}
+
+impl std::error::Error for PorousError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PorousError::Sparse(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<tpt_fem_sparse::SparseError> for PorousError {
+    fn from(e: tpt_fem_sparse::SparseError) -> Self {
+        PorousError::Sparse(e)
+    }
+}
+
+/// Checks the mesh is non-empty and uses only supported linear cells. The
+/// private element helpers rely on this and treat anything else as an internal
+/// invariant violation.
+fn validate_mesh(mesh: &Mesh) -> Result<(), PorousError> {
+    if mesh.elements.is_empty() {
+        return Err(PorousError::EmptyMesh);
+    }
+    for e in &mesh.elements {
+        match e.cell_type {
+            CellType::Line | CellType::Tri | CellType::Quad | CellType::Tet | CellType::Hex => {}
+            other => return Err(PorousError::UnsupportedCell(other)),
+        }
+    }
+    Ok(())
+}
+
 fn ref_grad_scalar(cell: CellType, xi: &[f64]) -> Vec<Vec<f64>> {
     match cell {
         CellType::Line => Line2::grad(xi),
@@ -137,7 +195,8 @@ pub fn solve_darcy(
     permeability: f64,
     source: &[Vec<f64>],
     dirichlet: &[(usize, f64)],
-) -> Result<Vec<f64>, tpt_fem_sparse::SparseError> {
+) -> Result<Vec<f64>, PorousError> {
+    validate_mesh(mesh)?;
     let order = 2;
     let coo = assemble(mesh, 1, |eid, m| scalar_elem(m, eid, permeability, order).0);
     let mut rhs = vec![0.0; mesh.node_count()];
@@ -148,7 +207,7 @@ pub fn solve_darcy(
             }
         }
     }
-    solve_with_dirichlet(&coo, &rhs, dirichlet)
+    Ok(solve_with_dirichlet(&coo, &rhs, dirichlet)?)
 }
 
 /// Terzaghi 1-D consolidation of a saturated column of height `H` (a `Line2`
@@ -171,10 +230,18 @@ pub fn terzaghi_consolidation(
     ev: f64,
     total_time: f64,
     dt: f64,
-) -> Vec<(f64, f64, f64)> {
-    // Uniform element length from the first element.
-    let e0 = &mesh.elements[0];
-    let _dz = (mesh.node_coords(e0.nodes[1])[0] - mesh.node_coords(e0.nodes[0])[0]).abs();
+) -> Result<Vec<(f64, f64, f64)>, PorousError> {
+    validate_mesh(mesh)?;
+    if mesh.elements.iter().any(|e| e.cell_type != CellType::Line) {
+        return Err(PorousError::InvalidInput(
+            "terzaghi_consolidation requires a Line2 mesh".into(),
+        ));
+    }
+    if !(dt.is_finite() && dt > 0.0) {
+        return Err(PorousError::InvalidInput(format!(
+            "time step must be finite and positive (got {dt})"
+        )));
+    }
 
     // Diffusion matrices: K = ∫ k ∇Nᵀ∇N, M = ∫ NᵀN. The Terzaghi equation is
     // ∂u/∂t = cᵥ ∂²u/∂z², whose FE form is M u̇ + cᵥ·K' u = 0 (K' = ∫∇Nᵀ∇N), so
@@ -196,12 +263,8 @@ pub fn terzaghi_consolidation(
     u[0] = q0; // impermeable base: no-flux handled by K structure (no top BC at z=0)
                // Drained top is the last node (largest coordinate).
     let top = (0..h)
-        .max_by(|&a, &b| {
-            mesh.node_coords(a)[0]
-                .partial_cmp(&mesh.node_coords(b)[0])
-                .unwrap()
-        })
-        .unwrap();
+        .max_by(|&a, &b| mesh.node_coords(a)[0].total_cmp(&mesh.node_coords(b)[0]))
+        .ok_or(PorousError::EmptyMesh)?;
     u[top] = 0.0;
 
     let dirichlet = [(top, 0.0)];
@@ -218,7 +281,7 @@ pub fn terzaghi_consolidation(
             }
             r[row] = s;
         }
-        let u_next = solve_with_dirichlet(&lhs, &r, &dirichlet).expect("terzaghi solve");
+        let u_next = solve_with_dirichlet(&lhs, &r, &dirichlet)?;
         u = u_next;
         u[top] = 0.0;
         t += dt;
@@ -235,13 +298,44 @@ pub fn terzaghi_consolidation(
         let max_u = u.iter().cloned().fold(0.0_f64, f64::max);
         out.push((t, settlement, max_u));
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tpt_fem_mesh::{CellType, MeshBuilder};
+
+    #[test]
+    fn rejects_empty_unsupported_and_bad_dt_instead_of_panicking() {
+        let empty = MeshBuilder::new().build();
+        assert!(matches!(
+            solve_darcy(&empty, 1.0, &[], &[]),
+            Err(PorousError::EmptyMesh)
+        ));
+        assert!(matches!(
+            terzaghi_consolidation(&empty, 1.0, 1.0, 1.0, 1.0, 0.1),
+            Err(PorousError::EmptyMesh)
+        ));
+
+        let mut b = MeshBuilder::new();
+        let ids: Vec<usize> = (0..3).map(|i| b.add_node(vec![i as f64, 0.0])).collect();
+        b.add_element(
+            CellType::Tri6,
+            vec![ids[0], ids[1], ids[2], ids[0], ids[1], ids[2]],
+        );
+        let p2 = b.build();
+        assert!(matches!(
+            solve_darcy(&p2, 1.0, &[], &[]),
+            Err(PorousError::UnsupportedCell(_))
+        ));
+
+        let col = line_mesh(4, 1.0);
+        assert!(matches!(
+            terzaghi_consolidation(&col, 1.0, 1.0, 1.0, 1.0, 0.0),
+            Err(PorousError::InvalidInput(_))
+        ));
+    }
 
     fn line_mesh(n: usize, length: f64) -> Mesh {
         let mut b = MeshBuilder::new();
@@ -285,7 +379,7 @@ mod tests {
         let cv = 0.1;
         let dt = 0.01; // stable: Δz²/(2 cᵥ) = 0.01/0.2 = 0.05
         let total = 30.0; // Tᵥ = cᵥ t / H² = 3 -> >95% consolidated
-        let hist = terzaghi_consolidation(&mesh, q0, cv, ev, total, dt);
+        let hist = terzaghi_consolidation(&mesh, q0, cv, ev, total, dt).unwrap();
         let final_settlement = hist.last().unwrap().1;
         let want = q0 * 1.0 / ev; // closed-form drained settlement
         assert!(

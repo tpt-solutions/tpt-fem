@@ -26,7 +26,7 @@
 //! let c = Coo::new();
 //! let nsteps = 200;
 //! let opts = NewmarkOptions { dt: 0.01, beta: 0.25, gamma: 0.5 };
-//! let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
+//! let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps).unwrap();
 //! let (t, u) = hist[nsteps].clone();
 //! // Closed form u(t) = cos(ω t), ω = 2.
 //! let want = (2.0 * t).cos();
@@ -191,6 +191,10 @@ impl Default for NewmarkOptions {
 /// `f(t)` returns the global load vector at time `t`. Returns the displacement
 /// history as `(t, u)` pairs for steps `0..=nsteps` (step 0 is the initial
 /// state).
+///
+/// Returns [`DynamicError::Sparse`] if the mass matrix or the effective
+/// stiffness is singular, and [`DynamicError::InvalidInput`] if `dt` or `β` is
+/// not a positive finite number.
 pub fn newmark(
     mass: &Coo,
     damping: &Coo,
@@ -200,11 +204,16 @@ pub fn newmark(
     f: impl Fn(f64) -> Vec<f64>,
     opts: &NewmarkOptions,
     nsteps: usize,
-) -> Vec<(f64, Vec<f64>)> {
+) -> Result<Vec<(f64, Vec<f64>)>, DynamicError> {
     let n = u0.len();
     let dt = opts.dt;
     let b = opts.beta;
     let g = opts.gamma;
+    if !(dt.is_finite() && dt > 0.0 && b.is_finite() && b > 0.0) {
+        return Err(DynamicError::InvalidInput(format!(
+            "newmark requires finite dt > 0 and beta > 0 (got dt = {dt}, beta = {b})"
+        )));
+    }
 
     // Convert the constant operators to CSR once; every step below does two
     // matvecs against damping and stiffness, and re-converting per call would
@@ -217,7 +226,7 @@ pub fn newmark(
     let r0: Vec<f64> = (0..n)
         .map(|i| f0[i] - csr_d.matvec(v0)[i] - csr_k.matvec(u0)[i])
         .collect();
-    let a0 = solve(mass, &r0).expect("mass matrix must be invertible");
+    let a0 = solve(mass, &r0)?;
 
     // Effective stiffness is constant; build it once.
     let k_hat = coo_add(
@@ -249,7 +258,7 @@ pub fn newmark(
             .map(|i| ft[i] + csr_m.matvec(&p_m)[i] + csr_d.matvec(&p_c)[i])
             .collect();
 
-        let u_new = solve(&k_hat, &rhs).expect("effective stiffness must be invertible");
+        let u_new = solve(&k_hat, &rhs)?;
 
         let a_new: Vec<f64> = (0..n)
             .map(|i| (u_new[i] - u[i]) / (b * dt * dt) - v[i] / (b * dt) - (0.5 / b - 1.0) * a[i])
@@ -263,7 +272,7 @@ pub fn newmark(
         a = a_new;
         history.push((t, u.clone()));
     }
-    history
+    Ok(history)
 }
 
 /// Options for the [`central_difference`] integrator.
@@ -514,10 +523,41 @@ mod tests {
             gamma: 0.5,
         };
         let nsteps = 400; // t = 2.0
-        let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
+        let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps).unwrap();
         let (t, u) = hist[nsteps].clone();
         let want = (2.0 * t).cos();
         assert!((u[0] - want).abs() < 5e-3, "got {} want {}", u[0], want);
+    }
+
+    #[test]
+    fn newmark_reports_singular_mass_and_bad_options() {
+        let zero_mass = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![0.0],
+        };
+        let k = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![1.0],
+        };
+        let c = Coo::new();
+        let opts = NewmarkOptions::default();
+        assert!(newmark(&zero_mass, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, 3).is_err());
+
+        let m = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![1.0],
+        };
+        let bad = NewmarkOptions {
+            dt: 0.0,
+            ..NewmarkOptions::default()
+        };
+        assert!(matches!(
+            newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &bad, 3),
+            Err(DynamicError::InvalidInput(_))
+        ));
     }
 
     #[test]
@@ -539,7 +579,7 @@ mod tests {
             beta: 0.25,
             gamma: 0.5,
         };
-        let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, 500);
+        let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, 500).unwrap();
         let dt = opts.dt;
         let e0 = 0.5 * 8.0 * 1.0_f64.powi(2); // u0=1, v0=0 -> E0 = ½ k
         for w in 1..hist.len() - 1 {

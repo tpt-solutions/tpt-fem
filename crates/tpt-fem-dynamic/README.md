@@ -53,7 +53,7 @@ let k = Coo { rows: vec![0], cols: vec![0], vals: vec![4.0] };
 let c = Coo::new();
 let nsteps = 200;
 let opts = NewmarkOptions { dt: 0.01, beta: 0.25, gamma: 0.5 };
-let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
+let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps).unwrap();
 let (t, u) = hist[nsteps].clone();
 // Closed form u(t) = cos(ω t), ω = 2.
 let want = (2.0 * t).cos();

@@ -84,9 +84,12 @@ fn q_bar(q: [f64; 4], theta_deg: f64) -> [f64; 6] {
 pub fn laminate_abd(plies: &[Ply]) -> [[f64; 6]; 6] {
     let total: f64 = plies.iter().map(|p| p.thickness).sum();
     // Ply interface z-levels, from bottom (-h/2) to top (+h/2).
-    let mut z = vec![-total / 2.0];
+    let mut z = Vec::with_capacity(plies.len() + 1);
+    let mut level = -total / 2.0;
+    z.push(level);
     for p in plies {
-        z.push(z.last().unwrap() + p.thickness);
+        level += p.thickness;
+        z.push(level);
     }
 
     // Per-ply Q̄ mapped into the 3×3 laminate constitutive form

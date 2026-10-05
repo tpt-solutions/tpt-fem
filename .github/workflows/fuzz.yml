@@ -1,0 +1,40 @@
+name: Fuzz
+
+# Executes the cargo-fuzz targets (ci.yml's `fuzz-build` only compiles them).
+# Weekly, plus manual dispatch before releases. Corpus and crash artifacts are
+# cached between runs so seeds and findings accumulate.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  fuzz-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Cache fuzz corpus and artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            fuzz/corpus
+            fuzz/artifacts
+          key: fuzz-corpus-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-
+      - name: Run fuzz targets
+        run: |
+          cd fuzz
+          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip vtk_import; do
+            cargo +nightly fuzz run $t -- -max_total_time=120 -timeout=10
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts

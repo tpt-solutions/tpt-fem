@@ -27,7 +27,7 @@ fn main() {
     b.add_element(CellType::Quad, vec![n1, n2, n5, n4]);
     let mesh = b.build();
 
-    let map = stokes_dofmap(&mesh);
+    let map = stokes_dofmap(&mesh).expect("supported mesh");
     let dim = map.components(0);
     println!("2-D Quad4 mesh: {} nodes, dim = {dim}", mesh.node_count());
     println!(
@@ -84,7 +84,7 @@ fn main() {
     }
     b3.add_element(CellType::Hex, ids);
     let mesh3 = b3.build();
-    let map3 = stokes_dofmap(&mesh3);
+    let map3 = stokes_dofmap(&mesh3).expect("supported mesh");
     println!(
         "\n3-D Hex8 mesh: {} nodes, dim = {}, ndof = {} ({} per node)",
         mesh3.node_count(),

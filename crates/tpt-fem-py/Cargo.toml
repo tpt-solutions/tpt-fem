@@ -2,7 +2,7 @@
 name = "tpt-fem-py"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 authors = ["TPT Solutions"]
 description = "Python bindings for the tpt-fem core (maturin, dev-only this pass)."

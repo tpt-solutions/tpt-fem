@@ -14,7 +14,7 @@
 //! `Line2`, `Tri3`, `Quad4`, `Tet4`, and `Hex8`, and support an arbitrary
 //! (uniform) number of degrees of freedom per node.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
@@ -358,7 +358,8 @@ fn face_quad(cell: CellType, order: usize) -> Result<(Vec<Vec<f64>>, Vec<f64>), 
                 r.weights,
             )
         }
-        other => panic!("face_quad: unsupported face cell {other:?}"),
+        // `faces_of` only ever yields `Line`/`Tri`/`Quad` faces.
+        other => unreachable!("face_quad: unsupported face cell {other:?}"),
     })
 }
 
@@ -420,7 +421,8 @@ fn surface(tangents: &[Vec<f64>], dim: usize) -> (f64, Vec<f64>) {
             }
             (m, n)
         }
-        _ => panic!("surface: unsupported face dimension {}", tangents.len()),
+        // Faces are edges (1 tangent) or surfaces (2 tangents) by construction.
+        _ => unreachable!("surface: unsupported face dimension {}", tangents.len()),
     }
 }
 
@@ -509,8 +511,9 @@ pub struct ReducedSystem {
 pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSystem {
     let n = rhs.len();
     let csr = coo.to_csr();
-    let fixed: HashSet<usize> = bcs.iter().map(|(i, _)| *i).collect();
-    let free: Vec<usize> = (0..n).filter(|i| !fixed.contains(i)).collect();
+    // DOF -> prescribed value (the last entry wins if a DOF is listed twice).
+    let fixed_vals: HashMap<usize, f64> = bcs.iter().copied().collect();
+    let free: Vec<usize> = (0..n).filter(|i| !fixed_vals.contains_key(i)).collect();
     let free_idx: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &v)| (v, k)).collect();
 
     let mut kred = Coo::new();
@@ -520,14 +523,7 @@ pub fn reduce_system(coo: &Coo, rhs: &[f64], bcs: &[(usize, f64)]) -> ReducedSys
         for c in csr.row_ptrs[fdof]..csr.row_ptrs[fdof + 1] {
             let col = csr.col_ind[c];
             let v = csr.values[c];
-            if fixed.contains(&col) {
-                // `col` was collected directly from `bcs` into `fixed`, so this
-                // DOF is guaranteed to appear in `bcs`. Contracted precondition
-                // (mirrors the `mat_det`/`mat_inv` treatment from Phase 9b/10a):
-                // converting the lookup to a `Result` was deferred because the
-                // invariant is local and provably true. See `todo.md` (11b).
-                debug_assert!(bcs.iter().any(|(i, _)| *i == col));
-                let val = bcs.iter().find(|(i, _)| *i == col).unwrap().1;
+            if let Some(&val) = fixed_vals.get(&col) {
                 r -= v * val;
             } else {
                 kred.push(free_idx[&fdof], free_idx[&col], v);

@@ -29,7 +29,7 @@ fn main() {
         beta: 0.25,
         gamma: 0.5,
     };
-    let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps);
+    let hist = newmark(&m, &c, &k, &[1.0], &[0.0], |_| vec![0.0], &opts, nsteps).unwrap();
 
     let (t, u) = hist[nsteps].clone();
     let want = (2.0 * t).cos(); // ω = 2

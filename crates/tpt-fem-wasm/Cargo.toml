@@ -2,7 +2,7 @@
 name = "tpt-fem-wasm"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 authors = ["TPT Solutions"]
 description = "In-browser (WebAssembly) topology-optimization demo for tpt-fem (wasm-pack, dev-only)."

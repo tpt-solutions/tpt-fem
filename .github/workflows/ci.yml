@@ -141,40 +141,96 @@ jobs:
             cargo +nightly build --bin $t
           done
 
-  # Actually execute the fuzz targets (the `fuzz-build` job only compiles them).
-  # Runs on manual dispatch only (run it before releases), with the corpus and
-  # crash artifacts cached between runs so seeds and findings accumulate. Each
-  # target gets a bounded wall-clock budget.
-  fuzz-run:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
-      - name: Cache fuzz corpus and artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            fuzz/corpus
-            fuzz/artifacts
-          key: fuzz-corpus-${{ github.sha }}
-          restore-keys: |
-            fuzz-corpus-
-      - name: Run fuzz targets
-        run: |
-          cd fuzz
-          for t in exodus_decode gmsh_import abaqus_inp exodus_roundtrip vtk_import; do
-            cargo +nightly fuzz run $t -- -max_total_time=120 -timeout=10
-          done
-
+  # Fuzz *execution* lives in fuzz.yml (weekly schedule + manual dispatch).
 
   # No no_std job: every tpt-fem-* crate needs std (Vec/HashMap-backed mesh
   # and sparse-matrix data structures, file I/O for mesh import), unlike
   # tpt-math's no_std=true substrate crates. Revisit only if a future crate
   # here declares no_std = true in tpt-rust-map/registry.toml.
+
+  # Declared MSRV must actually build. Keep in sync with `rust-version` in the
+  # root Cargo.toml (and the py/capi/wasm manifests).
+  msrv:
+    needs: [manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  # The wasm browser demo crate is excluded from the workspace, so nothing else
+  # builds it.
+  wasm-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tpt-fem-wasm
+      - name: Build tpt-fem-wasm for wasm32
+        working-directory: crates/tpt-fem-wasm
+        run: cargo build --release --target wasm32-unknown-unknown
+
+  # py/capi/wasm are not workspace members, so Cargo never checks that their
+  # `tpt-fem*` version pins track the workspace.
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_pins.py
+
+  # A crate whose src/ changed must touch its CHANGELOG.md (PRs only).
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/check_changelogs.sh "origin/${{ github.base_ref }}"
+
+  # `cargo package` verifies every publishable crate's manifest + packaged
+  # contents (catches metadata rejections like the 0.1.0 keyword-length error).
+  # Crates that depend on a not-yet-published bump can't fully verify against
+  # crates.io, so this lists/validates the package contents without building.
+  package:
+    needs: [manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate package contents for every workspace crate
+        run: |
+          for d in crates/tpt-fem*/; do
+            n=$(basename "$d")
+            case "$n" in tpt-fem-py|tpt-fem-capi|tpt-fem-wasm) continue ;; esac
+            echo "== $n"
+            cargo package -p "$n" --list --allow-dirty > /dev/null
+          done
+
+  # Advisory: flags public-API breaks that are not matched by a version bump.
+  semver:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: tpt-fem-quadrature,tpt-fem-element,tpt-fem-mesh,tpt-fem-sparse,tpt-fem-assembly
+
+  # Unused-dependency check.
+  machete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bnjbvr/cargo-machete@main
 
   cargo-deny:
     runs-on: ubuntu-latest
