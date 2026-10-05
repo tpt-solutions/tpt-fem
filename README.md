@@ -42,7 +42,7 @@ depend on.
 | [`tpt-fem-topopt`](crates/tpt-fem-topopt) | SIMP topology optimization for 2-D linear elasticity. | `tpt-fem-{sparse,assembly,element,quadrature}` |
 | [`tpt-fem-amr`](crates/tpt-fem-amr) | Adaptive h-refinement: 1-irregular quadtree Poisson with hanging-node elimination and ZZ error estimation. | `tpt-fem-sparse` |
 | [`tpt-fem`](crates/tpt-fem) | Umbrella crate re-exporting all of the above behind Cargo features, plus `prelude` and end-to-end tests. | all of the above |
-| [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `elasticity`, `modal`, `amr`, `mesh info`, `mesh convert`. | `tpt-fem` |
+| [`tpt-fem-cli`](crates/tpt-fem-cli) | Command-line driver: `solve`, `elasticity`, `modal`, `heat`, `amr`, `topopt`, `mesh info`, `mesh convert`. | `tpt-fem` |
 
 Every crate is tracked as `git` in the sibling
 [`tpt-rust-map/registry.toml`](https://github.com/tpt-solutions/tpt-rust-map).
