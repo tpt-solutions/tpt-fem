@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Added
 
 - `mesh convert` also writes `.stl` (boundary surface) and `.xdmf`.
@@ -61,4 +63,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   and `-o/--output` flags exporting the refined quadtree mesh and solution to
   ParaView `.vtk`.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-cli-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-cli-0.1.0

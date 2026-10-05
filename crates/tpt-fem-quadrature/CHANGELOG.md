@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Fixed
 
 - **`TetrahedronRule::Keast4`'s 11-point table was wrong**: several of its
@@ -42,4 +44,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Unit tests verifying polynomial-exactness against closed-form monomial
   integrals.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-quadrature-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-quadrature-0.1.0

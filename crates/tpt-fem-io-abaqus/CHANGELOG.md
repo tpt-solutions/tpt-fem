@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Fixed
 
 - An element record that appears before any `*ELEMENT` type line is rejected with `InpError::Parse` instead of hitting an `unwrap` on untrusted input.
@@ -28,4 +30,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   allocate unbounded memory for a malformed or adversarial `first, last`
   pair.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-io-abaqus-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-io-abaqus-0.1.0

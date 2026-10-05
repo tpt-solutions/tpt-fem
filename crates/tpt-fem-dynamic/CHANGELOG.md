@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - **Breaking:** `newmark` now returns `Result<Vec<(f64, Vec<f64>)>, DynamicError>`: a singular mass matrix or effective stiffness is reported as `DynamicError::Sparse`, and a non-finite or non-positive `dt` / `beta` as `DynamicError::InvalidInput`, instead of panicking.
@@ -48,4 +50,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   row structure instead of a full triplet scan per DOF. Results are
   unchanged (all integrator tests pass bit-for-bit within tolerance).
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-dynamic-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-dynamic-0.1.0

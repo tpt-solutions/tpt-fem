@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - **Breaking:** `lanczos_eigs` now returns `Result<Vec<(f64, Vec<f64>)>, SparseError>`: it reports an error when the projected tridiagonal eigensolve does not converge within its sweep budget, instead of silently returning fewer eigenpairs or an unconverged spectrum.
@@ -48,4 +50,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   `generalized_shift_inside_cluster_is_accurate` (shift mid-cluster, stressing
   the near-singular shift-invert solve).
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-eigen-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-eigen-0.1.0

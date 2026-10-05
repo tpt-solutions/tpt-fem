@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Changed
 
 - `laminate_abd` computes the ply interface levels with a running sum instead of `last().unwrap()` (no behaviour change).
@@ -22,4 +24,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `CohesiveLaw::traction` — traction for an effective opening on the monotonic loading branch.
 - `CohesiveLaw::toughness` — fracture toughness as the area under the traction–separation curve.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-composite-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-composite-0.1.0

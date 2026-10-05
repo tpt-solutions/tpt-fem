@@ -102,22 +102,22 @@ Topological order. Wait for each crate to appear in the index
 
 ### 4. Pre-flight checklist
 
-Code work (Phase 16 of `todo.md`) is done; what remains is mechanical:
+Code work (Phase 16 of `todo.md`) is done and the versions/pins/changelogs were bumped on 2026-10-06; the remaining unticked items are the final gate and the publish itself:
 
-- [ ] Rename each republished crate's `[Unreleased]` → `[<version>] - <date>`
+- [x] Rename each republished crate's `[Unreleased]` → `[<version>] - <date>`
       in its `CHANGELOG.md` and add the `[x.y.z]:` link at the bottom.
-- [ ] Bump `version` in each republished crate's `Cargo.toml` per §2.
-- [ ] Bump the matching entries in root `Cargo.toml` `[workspace.dependencies]`
+- [x] Bump `version` in each republished crate's `Cargo.toml` per §2.
+- [x] Bump the matching entries in root `Cargo.toml` `[workspace.dependencies]`
       (quadrature/sparse/mesh... patch pins may stay `"0.1.0"`, which still
       resolves to the new patch; breaking crates **must** move to `"0.2.0"`,
       and `tpt-fem-element`'s dependency on quadrature should be `"0.1.1"`
       because it needs `try_gauss_legendre`).
-- [ ] Update the `tpt-fem*` pins in `tpt-fem-py`, `tpt-fem-capi`, `tpt-fem-wasm`
+- [x] Update the `tpt-fem*` pins in `tpt-fem-py`, `tpt-fem-capi`, `tpt-fem-wasm`
       (checked by `just pins` / the CI `pins` job).
-- [ ] Update version snippets in `README.md` and per-crate READMEs
+- [x] Update version snippets in `README.md` and per-crate READMEs
       (`grep -rn '0\.1\.0'`).
-- [ ] `cargo update -w` and commit the refreshed `Cargo.lock` files.
-- [ ] Delete or fold in the stale `crates-publish-order.md`.
+- [x] `cargo update -w` and commit the refreshed `Cargo.lock` files.
+- [x] Delete or fold in the stale `crates-publish-order.md`.
 - [ ] Run `just release-check` (below) and the manual `fuzz` workflow once.
 
 ### 5. Verification gates

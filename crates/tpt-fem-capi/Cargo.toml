@@ -1,6 +1,6 @@
 [package]
 name = "tpt-fem-capi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,7 @@ name = "tpt_fem_capi"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-tpt-fem = { version = "0.1.0", path = "../tpt-fem", features = ["topopt"] }
+tpt-fem = { version = "0.2.0", path = "../tpt-fem", features = ["topopt"] }
 
 [build-dependencies]
 cbindgen = { version = "0.27", default-features = false }

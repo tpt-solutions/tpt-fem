@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Added
 
 - `ContactError::InvalidInput`: `augmented_lagrangian` rejects a constraint DOF outside the system and a non-finite or non-positive `penalty`/`tol` instead of panicking on an index (or looping uselessly with `penalty = 0`).
@@ -50,4 +52,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   pseudo-random point clouds, 2-D/duplicate/empty edge cases, and full-pairing
   agreement of `contact_pairs_octree` with `contact_pairs`.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-contact-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-contact-0.1.0

@@ -1220,7 +1220,7 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tpt-fem"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
  "toml",
@@ -1250,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-assembly"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-element",
  "tpt-fem-mesh",
@@ -1260,11 +1260,11 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-composite"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tpt-fem-contact"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-dofmap",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-coupling"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-dofmap",
@@ -1297,7 +1297,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-dynamic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-eigen",
@@ -1308,14 +1308,14 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-eigen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-sparse",
 ]
 
 [[package]]
 name = "tpt-fem-elasticity"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-eigen",
@@ -1327,14 +1327,14 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-element"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-quadrature",
 ]
 
 [[package]]
 name = "tpt-fem-fluid"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-dofmap",
@@ -1367,14 +1367,14 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-io-abaqus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-mesh",
 ]
 
 [[package]]
 name = "tpt-fem-io-exodus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-mesh",
 ]
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-mesh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mshio",
  "tpt-fem-element",
@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-mesh-gen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-mesh",
 ]
@@ -1413,7 +1413,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-porous"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-dofmap",
@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-py"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pyo3",
  "tpt-fem",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-quadrature"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tpt-fem-solve"
@@ -1446,14 +1446,14 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-sparse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-math-linalg-dense",
 ]
 
 [[package]]
 name = "tpt-fem-thermal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-element",
@@ -1464,7 +1464,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-topopt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-assembly",
  "tpt-fem-elasticity",
