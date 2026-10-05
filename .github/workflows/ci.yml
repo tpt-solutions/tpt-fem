@@ -224,7 +224,12 @@ jobs:
             n=$(basename "$d")
             case "$n" in tpt-fem-py|tpt-fem-capi|tpt-fem-wasm) continue ;; esac
             echo "== $n"
-            cargo package -p "$n" --list --allow-dirty > /dev/null
+            if [ "$n" = "tpt-fem-gpu" ]; then
+              # Excluded from the workspace (opt-in), so -p cannot see it.
+              cargo package --manifest-path "$d/Cargo.toml" --list --allow-dirty > /dev/null
+            else
+              cargo package -p "$n" --list --allow-dirty > /dev/null
+            fi
           done
 
   # Advisory: flags public-API breaks that are not matched by a version bump.
@@ -235,6 +240,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install system libs (russell features need BLAS/LAPACK headers)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapacke-dev libsuitesparse-dev
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           package: tpt-fem-quadrature,tpt-fem-element,tpt-fem-mesh,tpt-fem-sparse,tpt-fem-assembly
