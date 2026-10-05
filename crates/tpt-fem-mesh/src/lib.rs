@@ -236,6 +236,13 @@ pub enum ExportError {
     },
     /// An element references a node index beyond the node list.
     BadConnectivity(ElementId),
+    /// The format cannot represent this cell type (e.g. quadratic cells in
+    /// XDMF, or line cells in a surface format such as STL).
+    UnsupportedCell(CellType),
+    /// The format needs a single cell type but the mesh mixes several.
+    MixedCells,
+    /// The mesh has no elements, so there is nothing to export.
+    Empty,
 }
 
 impl std::fmt::Display for ExportError {
@@ -252,6 +259,13 @@ impl std::fmt::Display for ExportError {
             ExportError::BadConnectivity(e) => {
                 write!(f, "element {e} references a node outside the mesh")
             }
+            ExportError::UnsupportedCell(c) => {
+                write!(f, "{} cells are not supported by this export format", c.name())
+            }
+            ExportError::MixedCells => {
+                write!(f, "this export format needs a single cell type, but the mesh mixes several")
+            }
+            ExportError::Empty => write!(f, "the mesh has no elements"),
         }
     }
 }
@@ -553,6 +567,267 @@ impl Mesh {
             }
         }
         out.push_str("$EndElements\n");
+        Ok(out)
+    }
+
+    /// Boundary surface of the mesh as ASCII STL with outward-pointing normals.
+    ///
+    /// 3-D meshes (`Tet`/`Hex` and their P2 variants, via their corner nodes)
+    /// export their boundary faces; 2-D meshes (`Tri`/`Quad`/...) export the
+    /// elements themselves with `+z` normals. Quadrilateral faces are split into
+    /// two triangles. `Line` meshes have no surface and are rejected.
+    pub fn to_stl_string(&self, name: &str) -> Result<String, ExportError> {
+        use std::fmt::Write as _;
+        if self.elements.is_empty() {
+            return Err(ExportError::Empty);
+        }
+        let n = self.nodes.len();
+        for e in &self.elements {
+            if e.nodes.iter().any(|&k| k >= n) {
+                return Err(ExportError::BadConnectivity(e.id));
+            }
+        }
+        let p = |i: NodeId| -> [f64; 3] {
+            let c = &self.nodes[i].coords;
+            [
+                c.first().copied().unwrap_or(0.0),
+                c.get(1).copied().unwrap_or(0.0),
+                c.get(2).copied().unwrap_or(0.0),
+            ]
+        };
+        // Collect triangles as node-id triples (consistently oriented).
+        let mut tris: Vec<[NodeId; 3]> = Vec::new();
+        let mut push_face = |face: &[NodeId], outward_hint: Option<[f64; 3]>| {
+            let mut t = [face[0], face[1], face[2]];
+            if let Some(hint) = outward_hint {
+                let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let nrm = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                if nrm[0] * hint[0] + nrm[1] * hint[1] + nrm[2] * hint[2] < 0.0 {
+                    t.swap(1, 2);
+                }
+            }
+            tris.push(t);
+            if face.len() == 4 {
+                let mut t2 = [face[0], face[2], face[3]];
+                if let Some(hint) = outward_hint {
+                    let (a, b, c) = (p(t2[0]), p(t2[1]), p(t2[2]));
+                    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                    let nrm = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    if nrm[0] * hint[0] + nrm[1] * hint[1] + nrm[2] * hint[2] < 0.0 {
+                        t2.swap(1, 2);
+                    }
+                }
+                tris.push(t2);
+            }
+        };
+
+        // Face definitions on corner nodes, per (corner-)cell family.
+        let faces_of = |c: CellType| -> Option<&'static [&'static [usize]]> {
+            match c {
+                CellType::Tet | CellType::Tet10 => {
+                    Some(&[&[1, 2, 3], &[0, 2, 3], &[0, 1, 3], &[0, 1, 2]])
+                }
+                CellType::Hex | CellType::Hex20 | CellType::Hex27 => Some(&[
+                    &[0, 1, 2, 3],
+                    &[4, 5, 6, 7],
+                    &[0, 1, 5, 4],
+                    &[3, 2, 6, 7],
+                    &[0, 4, 7, 3],
+                    &[1, 5, 6, 2],
+                ]),
+                _ => None,
+            }
+        };
+        let any3d = self
+            .elements
+            .iter()
+            .any(|e| faces_of(e.cell_type).is_some());
+        if any3d {
+            let mut counts: HashMap<Vec<NodeId>, usize> = HashMap::new();
+            for e in &self.elements {
+                if let Some(fs) = faces_of(e.cell_type) {
+                    for f in fs {
+                        let mut key: Vec<NodeId> = f.iter().map(|&i| e.nodes[i]).collect();
+                        key.sort_unstable();
+                        *counts.entry(key).or_insert(0) += 1;
+                    }
+                }
+            }
+            for e in &self.elements {
+                let Some(fs) = faces_of(e.cell_type) else {
+                    continue;
+                };
+                let corners = if matches!(e.cell_type, CellType::Tet | CellType::Tet10) {
+                    4
+                } else {
+                    8
+                };
+                let mut centre = [0.0; 3];
+                for &k in &e.nodes[..corners] {
+                    let c = p(k);
+                    for d in 0..3 {
+                        centre[d] += c[d] / corners as f64;
+                    }
+                }
+                for f in fs {
+                    let ids: Vec<NodeId> = f.iter().map(|&i| e.nodes[i]).collect();
+                    let mut key = ids.clone();
+                    key.sort_unstable();
+                    if counts[&key] != 1 {
+                        continue;
+                    }
+                    let mut fc = [0.0; 3];
+                    for &k in &ids {
+                        let c = p(k);
+                        for d in 0..3 {
+                            fc[d] += c[d] / ids.len() as f64;
+                        }
+                    }
+                    let hint = [fc[0] - centre[0], fc[1] - centre[1], fc[2] - centre[2]];
+                    push_face(&ids, Some(hint));
+                }
+            }
+        } else {
+            for e in &self.elements {
+                match e.cell_type {
+                    CellType::Tri | CellType::Tri6 => {
+                        push_face(&e.nodes[..3], Some([0.0, 0.0, 1.0]))
+                    }
+                    CellType::Quad | CellType::Quad8 | CellType::Quad9 => {
+                        push_face(&e.nodes[..4], Some([0.0, 0.0, 1.0]))
+                    }
+                    other => return Err(ExportError::UnsupportedCell(other)),
+                }
+            }
+        }
+
+        let mut out = String::new();
+        let _ = writeln!(out, "solid {name}");
+        for t in &tris {
+            let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let mut nrm = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
+            if len > 0.0 {
+                for d in nrm.iter_mut() {
+                    *d /= len;
+                }
+            }
+            let _ = writeln!(out, "  facet normal {:e} {:e} {:e}", nrm[0], nrm[1], nrm[2]);
+            let _ = writeln!(out, "    outer loop");
+            for v in [a, b, c] {
+                let _ = writeln!(out, "      vertex {:e} {:e} {:e}", v[0], v[1], v[2]);
+            }
+            let _ = writeln!(out, "    endloop");
+            let _ = writeln!(out, "  endfacet");
+        }
+        let _ = writeln!(out, "endsolid {name}");
+        Ok(out)
+    }
+
+    /// Serialise the mesh and nodal fields as an XDMF 3 document with the data
+    /// embedded as XML text (no HDF5 needed; ParaView opens the `.xdmf` file
+    /// directly).
+    ///
+    /// Requires a single *linear* cell type (`Line`, `Tri`, `Quad`, `Tet` or
+    /// `Hex`). Each `(name, values)` field holds `node_count * k` values
+    /// (`k = 1` scalar, `k = 3` vector, any other `k` a matrix attribute).
+    pub fn to_xdmf_string(&self, fields: &[(&str, &[f64])]) -> Result<String, ExportError> {
+        use std::fmt::Write as _;
+        let first = self.elements.first().ok_or(ExportError::Empty)?;
+        let cell = first.cell_type;
+        if self.elements.iter().any(|e| e.cell_type != cell) {
+            return Err(ExportError::MixedCells);
+        }
+        let (topo, nper) = match cell {
+            CellType::Line => ("Polyline", 2),
+            CellType::Tri => ("Triangle", 3),
+            CellType::Quad => ("Quadrilateral", 4),
+            CellType::Tet => ("Tetrahedron", 4),
+            CellType::Hex => ("Hexahedron", 8),
+            other => return Err(ExportError::UnsupportedCell(other)),
+        };
+        let n = self.nodes.len();
+        for e in &self.elements {
+            if e.nodes.iter().any(|&k| k >= n) {
+                return Err(ExportError::BadConnectivity(e.id));
+            }
+        }
+        let mut comps = Vec::with_capacity(fields.len());
+        for (name, vals) in fields {
+            if n == 0 || vals.len() % n != 0 {
+                return Err(ExportError::FieldLength {
+                    name: (*name).to_string(),
+                    len: vals.len(),
+                    node_count: n,
+                });
+            }
+            comps.push(vals.len() / n);
+        }
+        let ne = self.elements.len();
+        let mut out = String::new();
+        out.push_str("<?xml version=\"1.0\" ?>\n<Xdmf Version=\"3.0\">\n  <Domain>\n");
+        out.push_str("    <Grid Name=\"mesh\" GridType=\"Uniform\">\n");
+        let _ = writeln!(
+            out,
+            "      <Topology TopologyType=\"{topo}\" NumberOfElements=\"{ne}\" NodesPerElement=\"{nper}\">"
+        );
+        let _ = writeln!(
+            out,
+            "        <DataItem Dimensions=\"{ne} {nper}\" NumberType=\"Int\" Format=\"XML\">"
+        );
+        for e in &self.elements {
+            let row: Vec<String> = e.nodes.iter().map(|k| k.to_string()).collect();
+            let _ = writeln!(out, "          {}", row.join(" "));
+        }
+        out.push_str("        </DataItem>\n      </Topology>\n");
+        out.push_str("      <Geometry GeometryType=\"XYZ\">\n");
+        let _ = writeln!(
+            out,
+            "        <DataItem Dimensions=\"{n} 3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">"
+        );
+        for node in &self.nodes {
+            let c = |k: usize| node.coords.get(k).copied().unwrap_or(0.0);
+            let _ = writeln!(out, "          {:e} {:e} {:e}", c(0), c(1), c(2));
+        }
+        out.push_str("        </DataItem>\n      </Geometry>\n");
+        for ((name, vals), k) in fields.iter().zip(&comps) {
+            let kind = match k {
+                1 => "Scalar",
+                3 => "Vector",
+                _ => "Matrix",
+            };
+            let _ = writeln!(
+                out,
+                "      <Attribute Name=\"{name}\" AttributeType=\"{kind}\" Center=\"Node\">"
+            );
+            let _ = writeln!(
+                out,
+                "        <DataItem Dimensions=\"{n} {k}\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">"
+            );
+            for i in 0..n {
+                let row: Vec<String> = (0..*k).map(|j| format!("{:e}", vals[i * k + j])).collect();
+                let _ = writeln!(out, "          {}", row.join(" "));
+            }
+            out.push_str("        </DataItem>\n      </Attribute>\n");
+        }
+        out.push_str("    </Grid>\n  </Domain>\n</Xdmf>\n");
         Ok(out)
     }
 
@@ -1177,6 +1452,126 @@ $EndElements
             let (x, y) = (p2.node_coords(*a), again.node_coords(*c));
             assert!((0..3).all(|k| (x[k] - y[k]).abs() < 1e-9), "{x:?} vs {y:?}");
         }
+    }
+
+    fn unit_tet_mesh() -> Mesh {
+        let mut b = MeshBuilder::new();
+        let ids: Vec<NodeId> = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+        .iter()
+        .map(|c| b.add_node(c.to_vec()))
+        .collect();
+        b.add_element(CellType::Tet, ids);
+        b.build()
+    }
+
+    #[test]
+    fn stl_of_tet_has_four_outward_facets() {
+        let stl = unit_tet_mesh().to_stl_string("tet").unwrap();
+        assert_eq!(stl.matches("facet normal").count(), 4);
+        assert!(stl.starts_with("solid tet") && stl.trim_end().ends_with("endsolid tet"));
+        // Every facet normal points away from the centroid (0.25, 0.25, 0.25).
+        let mut checked = 0;
+        let lines: Vec<&str> = stl.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            if let Some(rest) = l.trim().strip_prefix("facet normal ") {
+                let nrm: Vec<f64> = rest
+                    .split_whitespace()
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                let v0: Vec<f64> = lines[i + 2]
+                    .trim()
+                    .strip_prefix("vertex ")
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                let dot: f64 = (0..3).map(|d| nrm[d] * (v0[d] - 0.25)).sum();
+                assert!(dot > 0.0, "inward facet: {l}");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 4);
+    }
+
+    #[test]
+    fn stl_of_2d_and_hex_and_rejects_lines() {
+        let mut b = MeshBuilder::new();
+        let ids: Vec<NodeId> = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+            .iter()
+            .map(|c| b.add_node(c.to_vec()))
+            .collect();
+        b.add_element(CellType::Quad, ids);
+        let quad = b.build();
+        assert_eq!(
+            quad.to_stl_string("q")
+                .unwrap()
+                .matches("facet normal")
+                .count(),
+            2
+        );
+
+        let mut b = MeshBuilder::new();
+        let mut ids = Vec::new();
+        for k in 0..2 {
+            for (x, y) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+                ids.push(b.add_node(vec![x, y, k as f64]));
+            }
+        }
+        b.add_element(CellType::Hex, ids);
+        let hex = b.build();
+        // 6 quad faces -> 12 triangles.
+        assert_eq!(
+            hex.to_stl_string("h")
+                .unwrap()
+                .matches("facet normal")
+                .count(),
+            12
+        );
+
+        let mut b = MeshBuilder::new();
+        let a = b.add_node(vec![0.0]);
+        let c = b.add_node(vec![1.0]);
+        b.add_element(CellType::Line, vec![a, c]);
+        assert!(matches!(
+            b.build().to_stl_string("l"),
+            Err(ExportError::UnsupportedCell(CellType::Line))
+        ));
+        assert_eq!(
+            MeshBuilder::new().build().to_stl_string("e"),
+            Err(ExportError::Empty)
+        );
+    }
+
+    #[test]
+    fn xdmf_layout_fields_and_errors() {
+        let mesh = unit_tet_mesh();
+        let t = [1.0, 2.0, 3.0, 4.0];
+        let xml = mesh.to_xdmf_string(&[("T", &t)]).unwrap();
+        assert!(xml.contains("TopologyType=\"Tetrahedron\""));
+        assert!(xml.contains("NumberOfElements=\"1\""));
+        assert!(xml.contains("Dimensions=\"4 3\""));
+        assert!(xml.contains("Attribute Name=\"T\" AttributeType=\"Scalar\""));
+        assert!(xml.trim_end().ends_with("</Xdmf>"));
+        assert!(mesh.to_xdmf_string(&[("bad", &[1.0, 2.0, 3.0])]).is_err());
+
+        // Mixed and quadratic meshes are rejected.
+        let mut b = MeshBuilder::new();
+        let ids: Vec<NodeId> = (0..4)
+            .map(|i| b.add_node(vec![i as f64, 0.0, 0.0]))
+            .collect();
+        b.add_element(CellType::Tet, ids.clone());
+        b.add_element(CellType::Line, vec![ids[0], ids[1]]);
+        assert_eq!(b.build().to_xdmf_string(&[]), Err(ExportError::MixedCells));
+        let p2 = Mesh::from_msh_bytes(p2_msh(CellType::Tri6).as_bytes()).unwrap();
+        assert!(matches!(
+            p2.to_xdmf_string(&[]),
+            Err(ExportError::UnsupportedCell(CellType::Tri6))
+        ));
     }
 
     #[test]

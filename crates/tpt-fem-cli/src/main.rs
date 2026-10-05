@@ -3,6 +3,8 @@
 //! Subcommands:
 //! * `solve` — run a steady Poisson/heat-conduction problem from a TOML config.
 //! * `elasticity` / `modal` — elasticity and modal problems from a TOML config.
+//! * `heat` — transient heat conduction (θ-method) from a TOML config with a
+//!   `[time]` section.
 //! * `amr` — adaptive h-refinement Poisson solve on the unit square
 //!   (`tpt-fem-amr::solve_adaptive`): quadtree refinement driven by a
 //!   Zienkiewicz–Zhu error estimator with Dörfler marking.
@@ -12,7 +14,8 @@
 //! * `mesh info` — print summary statistics about a mesh file.
 //! * `mesh convert` — convert between mesh formats; the output format follows
 //!   the file extension: `.vtk` (default), `.msh` (Gmsh 4.1), `.inp` (Abaqus),
-//!   `.ex`/`.ex2`/`.e` (Exodus II) or `.csv` (node coordinates).
+//!   `.ex`/`.ex2`/`.e` (Exodus II), `.stl` (boundary surface), `.xdmf`
+//!   (single linear cell type, data embedded) or `.csv` (node coordinates).
 //!
 //! Error messages reuse the `Display` impls from the core crates, so malformed
 //! input reports a human-readable cause rather than a panic.
@@ -24,8 +27,9 @@ use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use tpt_fem::{
     boundary_faces, box_mesh, cantilever_load, read_exodus, read_inp, read_vtk, solve_adaptive,
-    solve_elasticity, solve_modal, solve_poisson, topopt_simp, write_vtk, write_vtk_with_data,
-    AmrOptions, CellType, ElasticModel, Error, Grid, Mesh, MeshBuilder, PointData, TopOptParams,
+    solve_elasticity, solve_modal, solve_poisson, solve_transient_heat, topopt_simp, write_vtk,
+    write_vtk_with_data, AmrOptions, CellType, ElasticModel, Error, Grid, Mesh, MeshBuilder,
+    PointData, TopOptParams, TransientHeatOptions,
 };
 
 type Err = Error;
@@ -55,6 +59,12 @@ enum Command {
     },
     /// Solve a natural-vibration (modal) problem (TOML config, `problem.type = "modal"`).
     Modal {
+        /// Path to the TOML problem description.
+        config: PathBuf,
+    },
+    /// Solve transient heat conduction (TOML config, `problem.type = "heat"`,
+    /// with a `[time]` section).
+    Heat {
         /// Path to the TOML problem description.
         config: PathBuf,
     },
@@ -138,6 +148,8 @@ struct Config {
     #[serde(default)]
     source: Source,
     #[serde(default)]
+    time: Time,
+    #[serde(default)]
     bc: Vec<Bc>,
     #[serde(default)]
     output: Output,
@@ -184,6 +196,45 @@ struct Material {
     /// Mass density `ρ` for modal problems.
     #[serde(default = "one")]
     density: f64,
+    /// Volumetric heat capacity `ρc` for transient heat problems.
+    #[serde(default = "one")]
+    rho_c: f64,
+}
+
+/// Time-stepping settings for `problem.type = "heat"`.
+#[derive(Deserialize)]
+struct Time {
+    /// Time step.
+    #[serde(default = "default_dt")]
+    dt: f64,
+    /// Number of steps.
+    #[serde(default = "default_nsteps")]
+    nsteps: usize,
+    /// θ-method parameter: 1 = backward Euler, 0.5 = Crank–Nicolson.
+    #[serde(default = "one")]
+    theta: f64,
+    /// Uniform initial temperature.
+    #[serde(default)]
+    initial: f64,
+}
+
+impl Default for Time {
+    fn default() -> Self {
+        Time {
+            dt: default_dt(),
+            nsteps: default_nsteps(),
+            theta: 1.0,
+            initial: 0.0,
+        }
+    }
+}
+
+fn default_dt() -> f64 {
+    0.01
+}
+
+fn default_nsteps() -> usize {
+    100
 }
 
 fn one() -> f64 {
@@ -310,6 +361,7 @@ fn run() -> Result<(), Err> {
         Command::Solve { config } => solve_config(&config, None),
         Command::Elasticity { config } => solve_config(&config, Some("elasticity")),
         Command::Modal { config } => solve_config(&config, Some("modal")),
+        Command::Heat { config } => solve_config(&config, Some("heat")),
         Command::Amr {
             max_elements,
             theta,
@@ -556,15 +608,49 @@ boundary = true
 vtk = \"mode1.vtk\"
 ";
 
+const HEAT_TEMPLATE: &str = "\
+[problem]
+type = \"heat\"
+
+[mesh]
+dim = 2
+min = [0.0, 0.0]
+max = [1.0, 1.0]
+n   = [20, 20]
+
+[material]
+conductivity = 1.0
+rho_c        = 1.0
+
+[source]
+constant = 0.0
+
+# theta = 1 backward Euler, 0.5 Crank-Nicolson.
+[time]
+dt      = 0.005
+nsteps  = 100
+theta   = 1.0
+initial = 1.0
+
+# Cool the whole boundary to 0.
+[[bc]]
+value = 0.0
+boundary = true
+
+[output]
+vtk = \"heat.vtk\"
+";
+
 /// Generate a starter problem config for `problem` and write it to `output`.
 fn init_config(problem: &str, output: &PathBuf) -> Result<(), Err> {
     let body = match problem.to_ascii_lowercase().as_str() {
         "elasticity" => ELASTICITY_TEMPLATE,
         "modal" => MODAL_TEMPLATE,
+        "heat" => HEAT_TEMPLATE,
         "poisson" => POISSON_TEMPLATE,
         other => {
             return Err(Error::Msg(format!(
-                "unknown problem type '{other}' (supported: poisson, elasticity, modal)"
+                "unknown problem type '{other}' (supported: poisson, elasticity, modal, heat)"
             )));
         }
     };
@@ -587,6 +673,9 @@ fn solve_config(path: &PathBuf, expected: Option<&str>) -> Result<(), Err> {
     }
 
     let mesh = build_mesh(&cfg.mesh)?;
+    if mesh.elements.is_empty() {
+        return Err(Error::Msg("the mesh contains no elements".into()));
+    }
     println!(
         "Mesh: {} nodes, {} elements",
         mesh.node_count(),
@@ -626,6 +715,36 @@ fn solve_config(path: &PathBuf, expected: Option<&str>) -> Result<(), Err> {
             println!("Solve time: {:.3?}", elapsed);
             println!("Solution u in [{:.6e}, {:.6e}]", umin, umax);
             write_vtk_with_data(&mesh, &[PointData::new("u", u)], vtk)?;
+        }
+        "heat" => {
+            let f = cfg.source.constant;
+            let bcs: Vec<(usize, f64)> = hits.iter().map(|h| (h.node, h.value)).collect();
+            let opts = TransientHeatOptions {
+                conductivity: cfg.material.conductivity,
+                rho_c: cfg.material.rho_c,
+                quad_order: 4,
+                dt: cfg.time.dt,
+                nsteps: cfg.time.nsteps,
+                theta: cfg.time.theta,
+            };
+            let initial = vec![cfg.time.initial; mesh.node_count()];
+            let t0 = Instant::now();
+            let hist = solve_transient_heat(&mesh, &opts, &initial, move |_, _| f, &bcs)
+                .map_err(|e| Error::Msg(format!("transient heat: {e}")))?;
+            let elapsed = t0.elapsed();
+            let (t_end, last) = hist
+                .last()
+                .ok_or_else(|| Error::Msg("empty history".into()))?;
+            let tmin = last.iter().cloned().fold(f64::INFINITY, f64::min);
+            let tmax = last.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            println!("DOFs:      {}", mesh.node_count());
+            println!(
+                "Steps:     {} (dt = {:e}, theta = {})",
+                opts.nsteps, opts.dt, opts.theta
+            );
+            println!("Solve time: {:.3?}", elapsed);
+            println!("T(t = {t_end:.4e}) in [{tmin:.6e}, {tmax:.6e}]");
+            write_vtk_with_data(&mesh, &[PointData::new("T", last.clone())], vtk)?;
         }
         "elasticity" => {
             let model = parse_model(&cfg.problem.model)?;
@@ -680,7 +799,7 @@ fn solve_config(path: &PathBuf, expected: Option<&str>) -> Result<(), Err> {
         }
         other => {
             return Err(Error::Msg(format!(
-                "unsupported problem type '{other}' (supported: poisson, elasticity, modal)"
+                "unsupported problem type '{other}' (supported: poisson, elasticity, modal, heat)"
             )));
         }
     }
@@ -919,6 +1038,18 @@ fn mesh_convert(input: &PathBuf, output: &PathBuf) -> Result<(), Err> {
                 .map_err(|e| Error::Msg(format!("gmsh export: {e}")))?;
             std::fs::write(output, text)?;
         }
+        "stl" => {
+            let text = mesh
+                .to_stl_string("tpt-fem")
+                .map_err(|e| Error::Msg(format!("stl export: {e}")))?;
+            std::fs::write(output, text)?;
+        }
+        "xdmf" => {
+            let text = mesh
+                .to_xdmf_string(&[])
+                .map_err(|e| Error::Msg(format!("xdmf export: {e}")))?;
+            std::fs::write(output, text)?;
+        }
         "csv" => {
             let text = mesh
                 .nodal_csv(&[])
@@ -1050,7 +1181,7 @@ $EndElements
     fn mesh_convert_picks_format_from_extension() {
         let msh = write_temp("tpt_fem_cli_convert_fmt_in.msh", TRI_MSH);
         let n = load_mesh(&msh).unwrap().node_count();
-        for ext in ["msh", "csv", "inp", "ex2"] {
+        for ext in ["msh", "csv", "inp", "ex2", "stl", "xdmf"] {
             let out = std::env::temp_dir().join(format!("tpt_fem_cli_convert_fmt_out.{ext}"));
             mesh_convert(&msh, &out).unwrap_or_else(|e| panic!("convert to {ext}: {e}"));
             assert!(std::fs::metadata(&out).unwrap().len() > 0, "{ext} empty");
@@ -1095,10 +1226,31 @@ $EndElements
     }
 
     #[test]
+    fn heat_runs_cools_and_writes_vtk() {
+        let cfg = std::env::temp_dir().join("tpt_fem_cli_heat.toml");
+        init_config("heat", &cfg).unwrap();
+        let out = std::env::temp_dir().join("tpt_fem_cli_heat_out.vtk");
+        let text = std::fs::read_to_string(&cfg)
+            .unwrap()
+            .replace("heat.vtk", &out.to_string_lossy().replace('\\', "/"))
+            .replace("n   = [20, 20]", "n   = [8, 8]");
+        std::fs::write(&cfg, text).unwrap();
+        solve_config(&cfg, Some("heat")).expect("heat solve");
+        assert!(std::fs::metadata(&out).unwrap().len() > 0);
+        // A poisson config must be rejected by the `heat` subcommand.
+        let poisson = std::env::temp_dir().join("tpt_fem_cli_heat_wrong.toml");
+        init_config("poisson", &poisson).unwrap();
+        assert!(solve_config(&poisson, Some("heat")).is_err());
+        let _ = std::fs::remove_file(&cfg);
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&poisson);
+    }
+
+    #[test]
     fn init_writes_starter_config() {
         // `init` must produce a parseable starter config for each problem
         // type; the generated Poisson config then drives a full solve.
-        for ptype in ["poisson", "elasticity", "modal"] {
+        for ptype in ["poisson", "elasticity", "modal", "heat"] {
             let cfg_path = std::env::temp_dir().join(format!("tpt_fem_cli_init_{ptype}.toml"));
             init_config(ptype, &cfg_path).unwrap_or_else(|e| panic!("{ptype}: {e}"));
             let text = std::fs::read_to_string(&cfg_path).expect("read generated config");
@@ -1122,7 +1274,7 @@ $EndElements
         // If the clap definition changes (e.g. becomes `--config`/flags), this
         // fails loudly instead of the docs silently diverging.
         let mut cmd = Cli::command();
-        for sub in ["solve", "elasticity", "modal"] {
+        for sub in ["solve", "elasticity", "modal", "heat"] {
             let usage = cmd
                 .find_subcommand_mut(sub)
                 .expect("subcommand exists")

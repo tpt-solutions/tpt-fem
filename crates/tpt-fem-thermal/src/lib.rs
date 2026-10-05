@@ -14,7 +14,7 @@
 //!
 //! Scalar fields (one degree of freedom per node) are assumed.
 
-use tpt_fem_assembly::{apply_neumann, apply_robin, solve_with_dirichlet, try_assemble};
+use tpt_fem_assembly::{apply_neumann, apply_robin, solve_with_dirichlet, try_assemble_parallel};
 use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
 };
@@ -368,10 +368,10 @@ pub fn solve_transient_heat(
         )));
     }
 
-    let k_coo = try_assemble(mesh, 1, |eid, m| {
+    let k_coo = try_assemble_parallel(mesh, 1, 0, |eid, m| {
         poisson_element_matrix(m, eid, opts.conductivity, opts.quad_order)
     })?;
-    let c_coo = try_assemble(mesh, 1, |eid, m| {
+    let c_coo = try_assemble_parallel(mesh, 1, 0, |eid, m| {
         heat_capacity_element_matrix(m, eid, opts.rho_c, opts.quad_order)
     })?;
     let (dt, th) = (opts.dt, opts.theta);
@@ -448,7 +448,7 @@ where
     S: Fn(&[f64]) -> f64,
 {
     let ndof = mesh.node_count();
-    let mut coo = try_assemble(mesh, 1, |eid, m| {
+    let mut coo = try_assemble_parallel(mesh, 1, 0, |eid, m| {
         poisson_element_matrix(m, eid, conductivity, quad_order)
     })?;
 

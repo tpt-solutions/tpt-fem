@@ -47,6 +47,9 @@ pub enum ContactError {
         /// The iteration budget that was exhausted.
         max_iter: usize,
     },
+    /// A constraint refers to a DOF outside the system, or `penalty`/`tol` is
+    /// not a finite positive number.
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for ContactError {
@@ -61,6 +64,7 @@ impl std::fmt::Display for ContactError {
                 "augmented-Lagrangian contact iteration did not converge within {max_iter} \
                  iterations (max violation {max_violation:e})"
             ),
+            ContactError::InvalidInput(m) => write!(f, "invalid contact input: {m}"),
         }
     }
 }
@@ -125,6 +129,18 @@ pub fn augmented_lagrangian(
     max_iter: usize,
     tol: f64,
 ) -> Result<(Vec<f64>, Vec<f64>), ContactError> {
+    if let Some(c) = constraints.iter().find(|c| c.dof >= load.len()) {
+        return Err(ContactError::InvalidInput(format!(
+            "constraint DOF {} is out of range for a system of {} DOFs",
+            c.dof,
+            load.len()
+        )));
+    }
+    if !(penalty.is_finite() && penalty > 0.0 && tol.is_finite() && tol > 0.0) {
+        return Err(ContactError::InvalidInput(format!(
+            "penalty and tol must be finite and positive (got {penalty}, {tol})"
+        )));
+    }
     let mut lambda = vec![0.0; constraints.len()];
     let mut u = vec![0.0; load.len()];
     let mut max_viol = f64::INFINITY;
@@ -261,19 +277,17 @@ mod tests {
 
     #[test]
     fn augmented_lagrangian_reports_solve_failure_instead_of_panicking() {
-        // `base` has a zero stiffness at the constrained DOF and no penalty
-        // path back to ground other than the contact constraint itself; with
-        // `penalty = 0` the augmented system is exactly singular (a
-        // rigid-body mode), which must surface as a `Sparse` error rather
-        // than panicking the process.
+        // DOF 1 has no stiffness and no constraint (a rigid-body mode), so the
+        // augmented system is exactly singular; this must surface as a
+        // `Sparse` error rather than panicking the process.
         let base = Coo {
             rows: vec![0],
             cols: vec![0],
-            vals: vec![0.0],
+            vals: vec![10.0],
         };
-        let load = vec![-1.0];
+        let load = vec![-1.0, 0.0];
         let con = ContactConstraint { dof: 0, lower: 0.0 };
-        let err = augmented_lagrangian(&base, &load, &[con], 0.0, 10, 1e-9).unwrap_err();
+        let err = augmented_lagrangian(&base, &load, &[con], 1e4, 10, 1e-9).unwrap_err();
         assert!(matches!(err, ContactError::Sparse(_)), "got {err:?}");
     }
 
@@ -401,5 +415,24 @@ mod tests {
                 other => panic!("option mismatch: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn augmented_lagrangian_rejects_bad_input() {
+        let base = Coo {
+            rows: vec![0],
+            cols: vec![0],
+            vals: vec![10.0],
+        };
+        let out_of_range = ContactConstraint { dof: 5, lower: 0.0 };
+        assert!(matches!(
+            augmented_lagrangian(&base, &[-4.0], &[out_of_range], 1e4, 50, 1e-9),
+            Err(ContactError::InvalidInput(_))
+        ));
+        let ok = ContactConstraint { dof: 0, lower: 0.0 };
+        assert!(matches!(
+            augmented_lagrangian(&base, &[-4.0], &[ok], 0.0, 50, 1e-9),
+            Err(ContactError::InvalidInput(_))
+        ));
     }
 }

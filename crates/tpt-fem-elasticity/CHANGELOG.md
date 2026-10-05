@@ -7,6 +7,14 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- Element assembly (`solve_elasticity`, `solve_modal`) now runs in parallel via `try_assemble_parallel`; results are unchanged.
+
+### Fixed
+
+- `elasticity_mass_matrix`, `elasticity_lumped_mass`, `solve_elasticity` and `solve_modal` return an error for a mesh with no elements instead of panicking on `elements[0]`.
+
 ### Added
 
 - `ElasticityError::Quadrature` variant, and `elasticity_body_vector`,

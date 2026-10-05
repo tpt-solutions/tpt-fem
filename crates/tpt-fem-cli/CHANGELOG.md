@@ -9,6 +9,18 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `mesh convert` also writes `.stl` (boundary surface) and `.xdmf`.
+
+### Fixed
+
+- A config whose mesh has no elements is rejected with a clear error instead of panicking.
+
+### Added
+
+- `heat` subcommand: transient heat conduction (θ-method) from a TOML config with a `[time]` section (`dt`, `nsteps`, `theta`, `initial`) and `material.rho_c`; `tpt-fem init heat` writes a starter config.
+
+### Added
+
 - `mesh convert` now chooses the output format from the file extension: `.vtk` (default), `.msh` (Gmsh 4.1), `.inp` (Abaqus), `.ex`/`.ex2`/`.e` (Exodus II) or `.csv` (node coordinates).
 
 ### Changed

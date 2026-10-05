@@ -426,6 +426,80 @@ fn surface(tangents: &[Vec<f64>], dim: usize) -> (f64, Vec<f64>) {
     }
 }
 
+/// Number of worker threads [`try_assemble_parallel`] uses for `threads = 0`.
+fn default_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
+}
+
+/// Multi-threaded, fallible variant of [`try_assemble`].
+///
+/// The element range is split into contiguous chunks, one per worker thread
+/// (`threads = 0` uses all available cores; small meshes fall back to a single
+/// thread), each worker scatters its elements into a private [`Coo`], and the
+/// per-thread triplet lists are concatenated **in element order**, so the result
+/// is bit-for-bit identical to [`try_assemble`] regardless of the thread count.
+/// The first error (in element order) is returned. `elem_matrix` must be
+/// `Sync` — any closure that only reads shared data is.
+pub fn try_assemble_parallel<E: Send>(
+    mesh: &Mesh,
+    dofs_per_node: usize,
+    threads: usize,
+    elem_matrix: impl Fn(usize, &Mesh) -> Result<Vec<Vec<f64>>, E> + Sync,
+) -> Result<Coo, E> {
+    let ne = mesh.elements.len();
+    let nthreads = if threads == 0 {
+        default_threads()
+    } else {
+        threads
+    }
+    .min(ne.div_ceil(256).max(1));
+    let scatter = |range: std::ops::Range<usize>| -> Result<Coo, E> {
+        let mut coo = Coo::new();
+        for eid in range {
+            let elem = &mesh.elements[eid];
+            let k = elem_matrix(eid, mesh)?;
+            let ndof = k.len();
+            for i in 0..ndof {
+                for j in 0..ndof {
+                    let kij = k[i][j];
+                    if kij == 0.0 {
+                        continue;
+                    }
+                    let gi = elem.nodes[i / dofs_per_node] * dofs_per_node + i % dofs_per_node;
+                    let gj = elem.nodes[j / dofs_per_node] * dofs_per_node + j % dofs_per_node;
+                    coo.push(gi, gj, kij);
+                }
+            }
+        }
+        Ok(coo)
+    };
+    if nthreads <= 1 {
+        return scatter(0..ne);
+    }
+    let chunk = ne.div_ceil(nthreads);
+    let parts: Vec<Result<Coo, E>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..nthreads)
+            .map(|t| {
+                let range = (t * chunk).min(ne)..((t + 1) * chunk).min(ne);
+                let scatter = &scatter;
+                scope.spawn(move || scatter(range))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("assembly worker panicked"))
+            .collect()
+    });
+    let mut out = Coo::new();
+    for part in parts {
+        let part = part?;
+        out.rows.extend(part.rows);
+        out.cols.extend(part.cols);
+        out.vals.extend(part.vals);
+    }
+    Ok(out)
+}
+
 /// Fallible variant of [`assemble`].
 ///
 /// Identical to [`assemble`], but `elem_matrix` may fail (returning an error of
@@ -547,8 +621,18 @@ pub fn solve_with_dirichlet(
     bcs: &[(usize, f64)],
 ) -> Result<Vec<f64>, SparseError> {
     let n = rhs.len();
+    if let Some(&(dof, _)) = bcs.iter().find(|(i, _)| *i >= n) {
+        return Err(SparseError::Numeric(format!(
+            "Dirichlet DOF {dof} is out of range for a system of {n} DOFs"
+        )));
+    }
     let reduced = reduce_system(coo, rhs, bcs);
-    let x = solve(&reduced.kred, &reduced.fred)?;
+    // Every DOF prescribed: nothing left to solve.
+    let x = if reduced.free.is_empty() {
+        Vec::new()
+    } else {
+        solve(&reduced.kred, &reduced.fred)?
+    };
     let mut u = vec![0.0; n];
     for (i, &dof) in reduced.free.iter().enumerate() {
         u[dof] = x[i];
@@ -886,5 +970,68 @@ mod tests {
 
         let mut coo = Coo::new();
         assert!(apply_robin_order(&mesh, 1, |_, _| 1.0, &mut coo, 6).is_err());
+    }
+
+    #[test]
+    fn parallel_assembly_matches_serial_exactly() {
+        // 40 x 40 structured Tri mesh = 3 200 elements, so several threads engage.
+        let n = 40;
+        let mut b = MeshBuilder::new();
+        let mut ids = vec![vec![0usize; n + 1]; n + 1];
+        for j in 0..=n {
+            for i in 0..=n {
+                ids[j][i] = b.add_node(vec![i as f64, j as f64 * 1.0]);
+            }
+        }
+        for j in 0..n {
+            for i in 0..n {
+                b.add_element(
+                    CellType::Tri,
+                    vec![ids[j][i], ids[j][i + 1], ids[j + 1][i + 1]],
+                );
+                b.add_element(
+                    CellType::Tri,
+                    vec![ids[j][i], ids[j + 1][i + 1], ids[j + 1][i]],
+                );
+            }
+        }
+        let mesh = b.build();
+        let elem = |eid: usize, _m: &Mesh| -> Result<Vec<Vec<f64>>, ()> {
+            let s = 1.0 + eid as f64 * 1e-3;
+            Ok(vec![
+                vec![2.0 * s, -s, -s],
+                vec![-s, 2.0 * s, -s],
+                vec![-s, -s, 2.0 * s],
+            ])
+        };
+        let serial = try_assemble(&mesh, 1, elem).unwrap();
+        for threads in [0, 1, 2, 7] {
+            let par = try_assemble_parallel(&mesh, 1, threads, elem).unwrap();
+            assert_eq!(serial, par, "threads = {threads}");
+        }
+        // The first error propagates.
+        let failing = |eid: usize, _m: &Mesh| -> Result<Vec<Vec<f64>>, usize> {
+            if eid == 1500 {
+                Err(eid)
+            } else {
+                Ok(vec![vec![1.0; 3]; 3])
+            }
+        };
+        assert_eq!(
+            try_assemble_parallel(&mesh, 1, 4, failing).unwrap_err(),
+            1500
+        );
+    }
+
+    #[test]
+    fn dirichlet_handles_fully_constrained_and_out_of_range() {
+        let mut coo = Coo::new();
+        coo.push(0, 0, 2.0);
+        coo.push(1, 1, 2.0);
+        // Every DOF prescribed: returns the prescribed values, no solve.
+        let u = solve_with_dirichlet(&coo, &[0.0, 0.0], &[(0, 1.0), (1, 2.0)]).unwrap();
+        assert_eq!(u, vec![1.0, 2.0]);
+        // An out-of-range DOF is an error, not an index panic.
+        assert!(solve_with_dirichlet(&coo, &[0.0, 0.0], &[(5, 1.0)]).is_err());
     }
 }

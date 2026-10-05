@@ -7,6 +7,14 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Fixed
+
+- `fsi_interface_loads` validates that every interface structure node and fluid node is in range and returns `CouplingError::Interface` instead of panicking on an out-of-bounds index.
+
+### Fixed
+
+- `thermal_structural` and the FSI coupling operator return an error for an empty structure/fluid mesh instead of panicking.
+
 ### Changed
 
 - **Breaking:** `fsi_interface_loads` now returns `Result<Vec<f64>, CouplingError>`: an empty structure mesh, an unsupported cell type, or a malformed interface pairing is reported as `CouplingError::Interface` instead of panicking.

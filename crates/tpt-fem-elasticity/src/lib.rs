@@ -11,7 +11,7 @@
 //! per-element matrices are scattered by `tpt-fem-assembly` and solved with
 //! `tpt-fem-sparse`.
 
-use tpt_fem_assembly::{reduce_system, solve_with_dirichlet, try_assemble};
+use tpt_fem_assembly::{reduce_system, solve_with_dirichlet, try_assemble_parallel};
 use tpt_fem_eigen::generalized_lanczos_eigs;
 use tpt_fem_element::{
     Hex20, Hex27, Hex8, Line2, Map, Quad4, Quad8, Quad9, ReferenceElement, Tet10, Tet4, Tri3, Tri6,
@@ -82,6 +82,14 @@ pub enum ElasticModel {
     PlaneStrain,
     /// 3-D isotropic continuum.
     Continuum3D,
+}
+
+/// Spatial dimension of the mesh's first cell, or an error for an empty mesh.
+fn mesh_dim(mesh: &Mesh) -> Result<usize, ElasticityError> {
+    mesh.elements
+        .first()
+        .map(|e| ref_dim(e.cell_type))
+        .ok_or_else(|| ElasticityError::ModelDimMismatch("mesh has no elements".into()))
 }
 
 fn ref_dim(cell: CellType) -> usize {
@@ -385,9 +393,9 @@ pub fn solve_elasticity(
     body_force: impl Fn(&[f64]) -> Vec<f64>,
     dirichlet: &[(usize, f64)],
 ) -> Result<Vec<f64>, SparseError> {
-    let dim = ref_dim(mesh.elements[0].cell_type);
+    let dim = mesh_dim(mesh)?;
     let ndof = mesh.node_count() * dim;
-    let coo = try_assemble(mesh, dim, |eid, m| {
+    let coo = try_assemble_parallel(mesh, dim, 0, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, quad_order)
     })
     .map_err(|e| SparseError::Numeric(e.to_string()))?;
@@ -416,7 +424,7 @@ pub fn elasticity_mass_matrix(
     density: f64,
     quad_order: usize,
 ) -> Result<Coo, ElasticityError> {
-    let dim = ref_dim(mesh.elements[0].cell_type);
+    let dim = mesh_dim(mesh)?;
     let mut coo = Coo::new();
     for elem in &mesh.elements {
         let phys: Vec<Vec<f64>> = elem
@@ -465,7 +473,7 @@ pub fn elasticity_lumped_mass(
     density: f64,
     quad_order: usize,
 ) -> Result<Coo, ElasticityError> {
-    let dim = ref_dim(mesh.elements[0].cell_type);
+    let dim = mesh_dim(mesh)?;
     let consistent = elasticity_mass_matrix(mesh, model, density, quad_order)?;
     let csr = consistent.to_csr();
     let n = csr.nrows;
@@ -504,9 +512,9 @@ pub fn solve_modal(
     num_modes: usize,
     dirichlet: &[(usize, f64)],
 ) -> Result<Vec<(f64, Vec<f64>)>, SparseError> {
-    let dim = ref_dim(mesh.elements[0].cell_type);
+    let dim = mesh_dim(mesh)?;
     let ndof = mesh.node_count() * dim;
-    let k = try_assemble(mesh, dim, |eid, m| {
+    let k = try_assemble_parallel(mesh, dim, 0, |eid, m| {
         elasticity_element_matrix(m, eid, model, young, poisson, quad_order)
     })
     .map_err(|e| SparseError::Numeric(e.to_string()))?;
@@ -1010,5 +1018,23 @@ mod tests {
             &[(0, 0.0), (1, 0.0)],
         )
         .is_err());
+    }
+
+    #[test]
+    fn empty_mesh_is_an_error_not_a_panic() {
+        let mesh = tpt_fem_mesh::MeshBuilder::new().build();
+        assert!(elasticity_mass_matrix(&mesh, ElasticModel::PlaneStress, 1.0, 2).is_err());
+        assert!(elasticity_lumped_mass(&mesh, ElasticModel::PlaneStress, 1.0, 2).is_err());
+        assert!(solve_elasticity(
+            &mesh,
+            ElasticModel::PlaneStress,
+            1.0,
+            0.3,
+            2,
+            |_| vec![0.0; 2],
+            &[]
+        )
+        .is_err());
+        assert!(solve_modal(&mesh, ElasticModel::PlaneStress, 1.0, 0.3, 1.0, 2, 1, &[]).is_err());
     }
 }

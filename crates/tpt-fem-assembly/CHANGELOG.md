@@ -7,6 +7,14 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- `try_assemble_parallel` — multi-threaded element assembly (`std::thread::scope`, no new dependency). The triplet lists are concatenated in element order, so the result is bit-for-bit identical to `try_assemble` for any thread count; `threads = 0` uses all cores and small meshes stay single-threaded.
+
+### Fixed
+
+- `solve_with_dirichlet` no longer fails with an opaque dimension error when every DOF is prescribed (it returns the prescribed values), and reports an out-of-range Dirichlet DOF as `SparseError` instead of panicking on an index.
+
 ### Changed
 
 - **Breaking:** `apply_neumann_order` / `apply_robin_order` now return
