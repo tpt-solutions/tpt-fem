@@ -67,3 +67,8 @@ release-check: verify pins msrv package
     cargo build --manifest-path crates/tpt-fem-capi/Cargo.toml
     cargo check --manifest-path crates/tpt-fem-py/Cargo.toml
     cargo check --manifest-path crates/tpt-fem-wasm/Cargo.toml --target wasm32-unknown-unknown
+    cargo test --manifest-path crates/tpt-fem-gpu/Cargo.toml
+
+# GPU benchmark (needs a GPU adapter): CPU vs GPU conjugate gradients.
+gpu-bench n="500":
+    cargo run --release --manifest-path crates/tpt-fem-gpu/Cargo.toml --example bench_cg -- {{n}}

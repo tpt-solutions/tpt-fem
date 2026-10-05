@@ -92,7 +92,11 @@ fn every_crates_directory_is_a_workspace_member() {
         }
         // tpt-fem-py (maturin), tpt-fem-wasm (wasm-pack) and tpt-fem-capi (cbindgen) are excluded from
         // the workspace and built by their own toolchains.
-        if name == "tpt-fem-py" || name == "tpt-fem-wasm" || name == "tpt-fem-capi" {
+        if name == "tpt-fem-py"
+            || name == "tpt-fem-wasm"
+            || name == "tpt-fem-capi"
+            || name == "tpt-fem-gpu"
+        {
             continue;
         }
         found += 1;

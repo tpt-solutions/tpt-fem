@@ -11,7 +11,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXCLUDED = ["tpt-fem-py", "tpt-fem-capi", "tpt-fem-wasm"]
+EXCLUDED = ["tpt-fem-py", "tpt-fem-capi", "tpt-fem-wasm", "tpt-fem-gpu"]
 
 
 def main() -> int:
@@ -30,6 +30,8 @@ def main() -> int:
             if not name.startswith("tpt-fem"):
                 continue
             version = spec.get("version") if isinstance(spec, dict) else spec
+            if name in EXCLUDED:
+                continue  # sibling excluded crate (e.g. tpt-fem-gpu): own version
             if name not in pins:
                 problems.append(f"{crate}: depends on unknown workspace crate {name}")
             elif version != pins[name]:
