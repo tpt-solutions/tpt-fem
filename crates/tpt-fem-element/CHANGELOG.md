@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - **Breaking:** `line_rule`, `quad_rule`, and `hex_rule` now return
@@ -38,4 +40,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Element-to-quadrature helpers `line_rule`, `quad_rule`, `hex_rule`,
   `tri_rule`, `tet_rule`.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-element-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-element-0.1.0

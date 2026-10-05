@@ -1,6 +1,6 @@
 [package]
 name = "tpt-fem-py"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ name = "tpt_fem"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tpt-fem = { version = "0.1.0", path = "../tpt-fem", features = ["topopt", "plasticity", "hyperelastic", "porous", "fluid", "composite", "dynamic", "contact", "coupling"] }
+tpt-fem = { version = "0.2.0", path = "../tpt-fem", features = ["topopt", "plasticity", "hyperelastic", "porous", "fluid", "composite", "dynamic", "contact", "coupling"] }
 pyo3 = { version = "0.23", features = ["extension-module"] }
 # Optional GPU acceleration (wgpu); build with `maturin develop --features gpu`.
 tpt-fem-gpu = { version = "0.1.0", path = "../tpt-fem-gpu", optional = true }

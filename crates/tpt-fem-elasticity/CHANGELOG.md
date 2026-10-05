@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - Element assembly (`solve_elasticity`, `solve_modal`) now runs in parallel via `try_assemble_parallel`; results are unchanged.
@@ -56,4 +58,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   assembly primitive gained a fallible `try_assemble` so element-matrix failures
   propagate instead of panicking.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-elasticity-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-elasticity-0.1.0

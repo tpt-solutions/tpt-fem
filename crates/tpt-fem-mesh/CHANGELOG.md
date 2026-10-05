@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Added
 
 - `Mesh::to_stl_string` — ASCII STL of the boundary surface with outward normals (3-D meshes export boundary faces, 2-D meshes the elements themselves; quads split into triangles).
@@ -34,4 +36,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `Mesh::from_msh_bytes` Gmsh `.msh` v4.1 ASCII import via `mshio`.
 - `MeshError` including `UnsupportedElementType` for non-linear elements.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-mesh-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-mesh-0.1.0

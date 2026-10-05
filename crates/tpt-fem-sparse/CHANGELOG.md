@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Changed
 
 - `solve` / `solve_multi` now route systems with ≥ 200 unknowns that are symmetric positive-definite to the envelope Cholesky automatically (every FEM solver in the workspace benefits, no API change); unsymmetric or indefinite systems, and any Cholesky failure, still use the dense LU. Results agree with the dense path to round-off.
@@ -50,4 +52,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   time-stepping / iterative loops that previously re-ran `to_csr()` on every
   matvec.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-sparse-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-sparse-0.1.0

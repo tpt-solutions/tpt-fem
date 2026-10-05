@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Added
 
 - `try_assemble_parallel` — multi-threaded element assembly (`std::thread::scope`, no new dependency). The triplet lists are concatenated in element order, so the result is bit-for-bit identical to `try_assemble` for any thread count; `threads = 0` uses all cores and small meshes stay single-threaded.
@@ -49,4 +51,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   fail (e.g. an invalid model/dimension combination), propagating the first error
   instead of panicking.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-assembly-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-assembly-0.1.0

@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - **Breaking:** `ModalData::modal_superposition` now returns `Result<Vec<(f64, Vec<f64>)>, DynamicError>` because the underlying `tpt_fem_dynamic::newmark` is fallible.
@@ -30,4 +32,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   integrating each independent modal equation with `tpt-fem-dynamic`'s
   Newmark scheme and recombining into the physical DOFs.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-modal-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-modal-0.1.0

@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Fixed
 
 - `fsi_interface_loads` validates that every interface structure node and fluid node is in range and returns `CouplingError::Interface` instead of panicking on an out-of-bounds index.
@@ -31,4 +33,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Examples: `thermal_bar_expansion`, `thermal_bimetal_strip`, `joule_heating`,
   `fsi_coupling`.
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-coupling-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-coupling-0.1.0

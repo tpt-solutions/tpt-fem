@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Changed
 
 - `tet_quality` dihedral computation no longer relies on `unwrap`; a degenerate face lookup is skipped (no behaviour change for valid tets).
@@ -23,4 +25,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `tet_quality` / `TetQuality` aspect-ratio metrics.
 - `laplacian_smooth` iterative node smoothing.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-mesh-gen-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-mesh-gen-0.1.0

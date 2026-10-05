@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Changed
 
 - **Breaking (via re-exports):** the umbrella re-exports the breaking `Result`
@@ -43,4 +45,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   stop), and `cantilever_dynamics_showcase` (modal analysis vs. beam theory
   plus Newmark/modal-superposition transient response).
 
+[0.2.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-0.2.0
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-0.1.0

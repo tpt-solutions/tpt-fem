@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-element"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tpt-fem-quadrature",
 ]
@@ -470,14 +470,14 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-io-abaqus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-mesh",
 ]
 
 [[package]]
 name = "tpt-fem-io-exodus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tpt-fem-mesh",
 ]
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-mesh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mshio",
  "tpt-fem-element",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-fem-quadrature"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "unicode-ident"

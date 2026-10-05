@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Fixed
 
 - A `connect*` variable whose suffix is not a number is now rejected with `ExodusError::Parse` instead of being silently attributed to block 1 (which could mis-assign cell types and corrupt connectivity).
@@ -33,4 +35,5 @@ _These items were recorded under `[Unreleased]` but are already present in the p
   an error instead of `.expect()`-ing on the writer path, so encoding can no longer
   panic.
 
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-io-exodus-0.1.1
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-io-exodus-0.1.0

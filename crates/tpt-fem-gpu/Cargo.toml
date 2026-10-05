@@ -12,7 +12,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
-tpt-fem-sparse = { version = "0.1.0", path = "../tpt-fem-sparse" }
+tpt-fem-sparse = { version = "0.1.1", path = "../tpt-fem-sparse" }
 wgpu = "24"
 pollster = "1"
 bytemuck = { version = "1", features = ["derive"] }

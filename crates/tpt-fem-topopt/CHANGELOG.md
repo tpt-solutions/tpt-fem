@@ -7,6 +7,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
 ### Changed
 
 - Depend on `tpt-fem-assembly` / `tpt-fem-elasticity` / `tpt-fem-element` 0.2.0 (no public API change).
@@ -22,3 +24,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `cantilever_problem` benchmark builder (clamped quad grid, tip load).
 
 [Unreleased]: https://github.com/tpt-solutions/tpt-fem/compare/HEAD
+
+[0.1.1]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-topopt-0.1.1
