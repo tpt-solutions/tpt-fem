@@ -605,7 +605,7 @@ pub fn apply_neumann(
 
 /// Like [`apply_neumann`] with an explicit quadrature order.
 ///
-/// Returns [`SparseError`] (wrapping a [`QuadratureError`](tpt_fem_quadrature::QuadratureError))
+/// Returns [`SparseError`] (wrapping a [`QuadratureError`])
 /// if `order` is out of range, rather than panicking.
 pub fn apply_neumann_order(
     mesh: &Mesh,
@@ -694,7 +694,7 @@ pub fn apply_robin(
 
 /// Like [`apply_robin`] with an explicit quadrature order.
 ///
-/// Returns [`SparseError`] (wrapping a [`QuadratureError`](tpt_fem_quadrature::QuadratureError))
+/// Returns [`SparseError`] (wrapping a [`QuadratureError`])
 /// if `order` is out of range, rather than panicking.
 pub fn apply_robin_order(
     mesh: &Mesh,
