@@ -9,6 +9,10 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `ContactError::InvalidInput`: `augmented_lagrangian` rejects a constraint DOF outside the system and a non-finite or non-positive `penalty`/`tol` instead of panicking on an index (or looping uselessly with `penalty = 0`).
+
+### Added
+
 - `ContactError` (with `From<SparseError>`), returned by `augmented_lagrangian`.
 
 ### Changed

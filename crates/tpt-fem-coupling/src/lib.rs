@@ -118,7 +118,10 @@ pub fn thermal_structural(
     delta_t: &[f64],
     dirichlet: &[(usize, f64)],
 ) -> Result<Vec<f64>, tpt_fem_sparse::SparseError> {
-    let dim = match mesh.elements[0].cell_type {
+    let first = mesh.elements.first().ok_or_else(|| {
+        tpt_fem_sparse::SparseError::Numeric("thermal_structural: empty mesh".into())
+    })?;
+    let dim = match first.cell_type {
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
@@ -223,6 +226,20 @@ pub fn fsi_interface_loads(
         .elements
         .first()
         .ok_or_else(|| CouplingError::Interface("fsi_interface_loads: empty mesh".into()))?;
+    for &(sn, fnode) in interface {
+        if sn >= struct_mesh.node_count() {
+            return Err(CouplingError::Interface(format!(
+                "interface structure node {sn} is out of range ({} nodes)",
+                struct_mesh.node_count()
+            )));
+        }
+        if fnode >= fluid_pressure.len() {
+            return Err(CouplingError::Interface(format!(
+                "interface fluid node {fnode} is out of range ({} pressure values)",
+                fluid_pressure.len()
+            )));
+        }
+    }
     let dim = match first.cell_type {
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
@@ -473,7 +490,11 @@ pub fn fsi_coupling(
     struct_dirichlet: &[(usize, f64)],
     fluid_penalty: f64,
 ) -> Result<Vec<f64>, CouplingError> {
-    let dim = match struct_mesh.elements[0].cell_type {
+    let sfirst = struct_mesh
+        .elements
+        .first()
+        .ok_or_else(|| CouplingError::Interface("coupling: empty structure mesh".into()))?;
+    let dim = match sfirst.cell_type {
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
@@ -485,7 +506,11 @@ pub fn fsi_coupling(
     };
     // Displace fluid nodes per the interface map.
     let mut fluid = fluid_mesh.clone();
-    let fdim = match fluid.elements[0].cell_type {
+    let ffirst = fluid
+        .elements
+        .first()
+        .ok_or_else(|| CouplingError::Interface("coupling: empty fluid mesh".into()))?;
+    let fdim = match ffirst.cell_type {
         CellType::Line => 1,
         CellType::Tri | CellType::Quad => 2,
         CellType::Tet | CellType::Hex => 3,
@@ -1026,11 +1051,33 @@ mod tests {
     }
 
     #[test]
+    fn thermal_structural_rejects_empty_mesh() {
+        let mesh = MeshBuilder::new().build();
+        let r = thermal_structural(&mesh, ElasticModel::PlaneStress, 1.0, 0.3, 1e-5, &[], &[]);
+        assert!(r.is_err());
+    }
+
+    #[test]
     fn ref_quad_rejects_out_of_range_order() {
         assert!(matches!(
             ref_quad(CellType::Quad, 9),
             Err(CouplingError::Quadrature(_))
         ));
         assert!(ref_quad(CellType::Quad, 2).is_ok());
+    }
+
+    #[test]
+    fn fsi_interface_loads_rejects_out_of_range_nodes() {
+        let mut b = MeshBuilder::new();
+        let ids: Vec<usize> = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+            .iter()
+            .map(|c| b.add_node(c.to_vec()))
+            .collect();
+        b.add_element(CellType::Tri, ids);
+        let mesh = b.build();
+        let p = [1.0, 1.0, 1.0];
+        assert!(fsi_interface_loads(&mesh, &[(9, 0)], &p).is_err());
+        assert!(fsi_interface_loads(&mesh, &[(0, 99)], &p).is_err());
+        assert!(fsi_interface_loads(&mesh, &[(0, 0), (1, 1)], &p).is_ok());
     }
 }

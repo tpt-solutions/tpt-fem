@@ -9,6 +9,12 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `Mesh::to_stl_string` — ASCII STL of the boundary surface with outward normals (3-D meshes export boundary faces, 2-D meshes the elements themselves; quads split into triangles).
+- `Mesh::to_xdmf_string` — XDMF 3 document with embedded XML data and nodal attributes (single linear cell type), openable directly in ParaView without HDF5.
+- `ExportError` variants `UnsupportedCell`, `MixedCells`, `Empty`.
+
+### Added
+
 - `Mesh::to_msh_string` — ASCII Gmsh MSH 4.1 writer (inverse of `from_msh_bytes`, including P2 node reordering); regions are not written.
 - `Mesh::nodal_csv` — CSV export of node coordinates plus scalar/vector nodal fields.
 - `ExportError` for the two export helpers.

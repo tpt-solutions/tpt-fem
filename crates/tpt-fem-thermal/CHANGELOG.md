@@ -7,6 +7,10 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- Element assembly (`solve_poisson`, `solve_transient_heat`) now runs in parallel via `try_assemble_parallel`; results are unchanged.
+
 ### Added
 
 - `solve_transient_heat`, `TransientHeatOptions` and `heat_capacity_element_matrix`: transient heat conduction `ρc ∂T/∂t − ∇·(k∇T) = f(x, t)` by the θ-method (backward Euler / Crank–Nicolson / forward Euler), with Dirichlet conditions and a time-dependent source; verified against the analytic `exp(−π²t)·sin(πx)` decay and the steady-state limit.
