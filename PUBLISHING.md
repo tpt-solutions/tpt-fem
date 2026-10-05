@@ -9,7 +9,7 @@ Out of scope for crates.io: `tpt-fem-py` (PyPI via maturin), `tpt-fem-wasm` and
 
 ---
 
-## Release 0.2.0 — next round
+## Release 0.2.0 — published 2026-10-06 (crates.io); tag, PyPI and capi steps below still pending
 
 Baseline: the 0.1.0 publish. **Verified against crates.io (2026-10-05):** the
 published 0.1.0 tarballs of all 27 crates are source-identical (ignoring line
@@ -76,27 +76,27 @@ Topological order. Wait for each crate to appear in the index
 
 | # | Crate | → | Status |
 |---|-------|---|--------|
-| 1 | tpt-fem-quadrature | 0.1.1 | ⬜ |
-| 2 | tpt-fem-sparse | 0.1.1 | ⬜ |
-| 3 | tpt-fem-eigen | 0.2.0 | ⬜ |
-| 4 | tpt-fem-composite | 0.1.1 | ⬜ |
-| 5 | tpt-fem-element | 0.2.0 | ⬜ |
-| 6 | tpt-fem-mesh | 0.1.1 | ⬜ |
-| 7 | tpt-fem-mesh-gen | 0.1.1 | ⬜ |
-| 8 | tpt-fem-io-abaqus | 0.1.1 | ⬜ |
-| 9 | tpt-fem-io-exodus | 0.1.1 | ⬜ |
-| 10 | tpt-fem-assembly | 0.2.0 | ⬜ |
-| 11 | tpt-fem-elasticity | 0.2.0 | ⬜ |
-| 12 | tpt-fem-thermal | 0.2.0 | ⬜ |
-| 13 | tpt-fem-contact | 0.2.0 | ⬜ |
-| 14 | tpt-fem-dynamic | 0.2.0 | ⬜ |
-| 15 | tpt-fem-fluid | 0.2.0 | ⬜ |
-| 16 | tpt-fem-modal | 0.2.0 | ⬜ |
-| 17 | tpt-fem-porous | 0.2.0 | ⬜ |
-| 18 | tpt-fem-topopt | 0.1.1 | ⬜ |
-| 19 | tpt-fem-coupling | 0.2.0 | ⬜ |
-| 20 | tpt-fem | 0.2.0 | ⬜ |
-| 21 | tpt-fem-cli | 0.2.0 | ⬜ |
+| 1 | tpt-fem-quadrature | 0.1.1 | ✅ published |
+| 2 | tpt-fem-sparse | 0.1.1 | ✅ published |
+| 3 | tpt-fem-eigen | 0.2.0 | ✅ published |
+| 4 | tpt-fem-composite | 0.1.1 | ✅ published |
+| 5 | tpt-fem-element | 0.2.0 | ✅ published |
+| 6 | tpt-fem-mesh | 0.1.1 | ✅ published |
+| 7 | tpt-fem-mesh-gen | 0.1.1 | ✅ published |
+| 8 | tpt-fem-io-abaqus | 0.1.1 | ✅ published |
+| 9 | tpt-fem-io-exodus | 0.1.1 | ✅ published |
+| 10 | tpt-fem-assembly | 0.2.0 | ✅ published |
+| 11 | tpt-fem-elasticity | 0.2.0 | ✅ published |
+| 12 | tpt-fem-thermal | 0.2.0 | ✅ published |
+| 13 | tpt-fem-contact | 0.2.0 | ✅ published |
+| 14 | tpt-fem-dynamic | 0.2.0 | ✅ published |
+| 15 | tpt-fem-fluid | 0.2.0 | ✅ published |
+| 16 | tpt-fem-modal | 0.2.0 | ✅ published |
+| 17 | tpt-fem-porous | 0.2.0 | ✅ published |
+| 18 | tpt-fem-topopt | 0.1.1 | ✅ published |
+| 19 | tpt-fem-coupling | 0.2.0 | ✅ published |
+| 20 | tpt-fem | 0.2.0 | ✅ published |
+| 21 | tpt-fem-cli | 0.2.0 | ✅ published |
 | — | tpt-fem-py | 0.2.0 | 🚫 PyPI (`maturin publish`, after crates.io) |
 | — | tpt-fem-wasm, tpt-fem-capi | 0.1.0 | 🚫 `publish = false` |
 
