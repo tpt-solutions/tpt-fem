@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Mesh::to_msh_string` — ASCII Gmsh MSH 4.1 writer (inverse of `from_msh_bytes`, including P2 node reordering); regions are not written.
+- `Mesh::nodal_csv` — CSV export of node coordinates plus scalar/vector nodal fields.
+- `ExportError` for the two export helpers.
+
+### Changed
+
+- Depend on `tpt-fem-element` 0.2.0 (internal use only — no public API change).
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

@@ -9,6 +9,10 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `.github/workflows/capi-release.yml`: builds prebuilt shared/static libraries plus the header for Linux, macOS and Windows on manual dispatch or a `capi-v*` tag, attaching the archives to a GitHub release.
+
+### Added
+
 - Initial C ABI (`cdylib` + `staticlib`) with a cbindgen-generated
   `include/tpt_fem.h`: mesh (`tpt_mesh_load` / `tpt_mesh_box` / coords / node
   queries / `tpt_mesh_write_vtk`), `tpt_solve_poisson` (constant or callback

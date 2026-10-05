@@ -7,6 +7,11 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- `solve_transient_heat`, `TransientHeatOptions` and `heat_capacity_element_matrix`: transient heat conduction `ρc ∂T/∂t − ∇·(k∇T) = f(x, t)` by the θ-method (backward Euler / Crank–Nicolson / forward Euler), with Dirichlet conditions and a time-dependent source; verified against the analytic `exp(−π²t)·sin(πx)` decay and the steady-state limit.
+- `ThermalError::Sparse` and `ThermalError::InvalidInput` variants (with `From<SparseError>`).
+
 ### Changed
 
 - **Breaking:** `poisson_element_matrix` and `poisson_source_vector` now

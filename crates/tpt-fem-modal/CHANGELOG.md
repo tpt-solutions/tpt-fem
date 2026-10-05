@@ -7,6 +7,10 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `ModalData::modal_superposition` now returns `Result<Vec<(f64, Vec<f64>)>, DynamicError>` because the underlying `tpt_fem_dynamic::newmark` is fallible.
+
 ### Planned
 
 - Mode-acceleration and residual-vector corrections for truncated bases.

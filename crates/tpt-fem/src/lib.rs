@@ -142,6 +142,50 @@ pub enum Error {
     #[cfg(feature = "solve")]
     #[error(transparent)]
     Newton(#[from] tpt_fem_solve::NewtonError),
+    /// `tpt-fem-quadrature` unsupported rule order.
+    #[cfg(feature = "quadrature")]
+    #[error(transparent)]
+    Quadrature(#[from] tpt_fem_quadrature::QuadratureError),
+    /// `tpt-fem-element` rule/mapping error.
+    #[cfg(feature = "element")]
+    #[error(transparent)]
+    Element(#[from] tpt_fem_element::ElementError),
+    /// `tpt-fem-thermal` element-operator error.
+    #[cfg(feature = "thermal")]
+    #[error(transparent)]
+    Thermal(#[from] tpt_fem_thermal::ThermalError),
+    /// `tpt-fem-elasticity` model/quadrature error.
+    #[cfg(feature = "elasticity")]
+    #[error(transparent)]
+    Elasticity(#[from] tpt_fem_elasticity::ElasticityError),
+    /// `tpt-fem-dynamic` time-integration error.
+    #[cfg(feature = "dynamic")]
+    #[error(transparent)]
+    Dynamic(#[from] tpt_fem_dynamic::DynamicError),
+    /// `tpt-fem-contact` constraint-solve error.
+    #[cfg(feature = "contact")]
+    #[error(transparent)]
+    Contact(#[from] tpt_fem_contact::ContactError),
+    /// `tpt-fem-fluid` solver error.
+    #[cfg(feature = "fluid")]
+    #[error(transparent)]
+    Fluid(#[from] tpt_fem_fluid::FluidError),
+    /// `tpt-fem-porous` solver error.
+    #[cfg(feature = "porous")]
+    #[error(transparent)]
+    Porous(#[from] tpt_fem_porous::PorousError),
+    /// `tpt-fem-coupling` operator error.
+    #[cfg(feature = "coupling")]
+    #[error(transparent)]
+    Coupling(#[from] tpt_fem_coupling::CouplingError),
+    /// `tpt-fem-plasticity` solver error.
+    #[cfg(feature = "plasticity")]
+    #[error(transparent)]
+    Plasticity(#[from] tpt_fem_plasticity::PlasticityError),
+    /// `tpt-fem-hyperelastic` solver error.
+    #[cfg(feature = "hyperelastic")]
+    #[error(transparent)]
+    Hyperelastic(#[from] tpt_fem_hyperelastic::HyperelasticError),
 }
 
 // NOTE: `tpt-fem-amr` also exports its own internal `solve_poisson` (over a

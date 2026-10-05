@@ -30,17 +30,38 @@ use tpt_fem_sparse::SparseError;
 pub enum ThermalError {
     /// The requested Gauss–Legendre `quad_order` is out of range.
     Quadrature(QuadratureError),
+    /// The sparse linear solve of a time step failed.
+    Sparse(SparseError),
+    /// A caller-supplied parameter is invalid (non-positive `dt`, wrong-length
+    /// initial field, `theta` outside `[0, 1]`, ...).
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for ThermalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ThermalError::Quadrature(e) => write!(f, "{e}"),
+            ThermalError::Sparse(e) => write!(f, "thermal solve failed: {e}"),
+            ThermalError::InvalidInput(m) => write!(f, "thermal: invalid input: {m}"),
         }
     }
 }
 
-impl std::error::Error for ThermalError {}
+impl std::error::Error for ThermalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ThermalError::Quadrature(e) => Some(e),
+            ThermalError::Sparse(e) => Some(e),
+            ThermalError::InvalidInput(_) => None,
+        }
+    }
+}
+
+impl From<SparseError> for ThermalError {
+    fn from(e: SparseError) -> Self {
+        ThermalError::Sparse(e)
+    }
+}
 
 impl From<QuadratureError> for ThermalError {
     fn from(e: QuadratureError) -> Self {
@@ -50,7 +71,10 @@ impl From<QuadratureError> for ThermalError {
 
 impl From<ThermalError> for SparseError {
     fn from(e: ThermalError) -> Self {
-        SparseError::Numeric(e.to_string())
+        match e {
+            ThermalError::Sparse(inner) => inner,
+            other => SparseError::Numeric(other.to_string()),
+        }
     }
 }
 
@@ -233,6 +257,176 @@ pub fn poisson_source_vector(
     Ok(f)
 }
 
+/// Element heat-capacity (consistent mass) matrix `C_e = rho_c * int N^T N dV`,
+/// returned in node order (1 DOF/node).
+///
+/// Returns [`ThermalError`] if `quad_order` is out of range.
+pub fn heat_capacity_element_matrix(
+    mesh: &Mesh,
+    eid: usize,
+    rho_c: f64,
+    quad_order: usize,
+) -> Result<Vec<Vec<f64>>, ThermalError> {
+    let elem = &mesh.elements[eid];
+    let phys: Vec<Vec<f64>> = elem
+        .nodes
+        .iter()
+        .map(|&n| mesh.node_coords(n).to_vec())
+        .collect();
+    let cell = elem.cell_type;
+    let (qpts, qw) = cell_quad(cell, quad_order)?;
+    let n = elem.nodes.len();
+    let mut c = vec![vec![0.0; n]; n];
+    for (qp, w) in qpts.iter().zip(&qw) {
+        let ns = ref_shape(cell, qp);
+        let local = ref_grad(cell, qp);
+        let map = Map::from_nodes_and_grad(&phys, &local);
+        let det = map.determinant.abs();
+        for i in 0..n {
+            for j in 0..n {
+                c[i][j] += w * rho_c * ns[i] * ns[j] * det;
+            }
+        }
+    }
+    Ok(c)
+}
+
+/// Parameters of the transient heat-conduction solver
+/// [`solve_transient_heat`].
+#[derive(Clone, Copy, Debug)]
+pub struct TransientHeatOptions {
+    /// Constant conductivity `k`.
+    pub conductivity: f64,
+    /// Volumetric heat capacity `rho * c`.
+    pub rho_c: f64,
+    /// Gauss-Legendre order for the element integrals.
+    pub quad_order: usize,
+    /// Time step (must be positive).
+    pub dt: f64,
+    /// Number of steps to take.
+    pub nsteps: usize,
+    /// Time-integration parameter `theta` in `[0, 1]`: `1` = backward Euler
+    /// (unconditionally stable, first order), `0.5` = Crank-Nicolson (second
+    /// order), `0` = forward Euler (conditionally stable).
+    pub theta: f64,
+}
+
+impl Default for TransientHeatOptions {
+    fn default() -> Self {
+        TransientHeatOptions {
+            conductivity: 1.0,
+            rho_c: 1.0,
+            quad_order: 2,
+            dt: 0.01,
+            nsteps: 10,
+            theta: 1.0,
+        }
+    }
+}
+
+/// Transient heat conduction `rho_c * dT/dt - div(k grad T) = f(x, t)` by the
+/// theta-method.
+///
+/// Each step solves
+/// `(C/dt + theta K) T_{n+1} = (C/dt - (1-theta) K) T_n + theta f_{n+1} + (1-theta) f_n`
+/// with the `dirichlet` DOFs held at their prescribed `(dof, value)`. `source`
+/// is `f(x, t)`; `initial` is the nodal temperature at `t = 0`. Returns the
+/// nodal temperature history `(t, T)` for steps `0..=nsteps` (step 0 is
+/// `initial`, with the Dirichlet values imposed).
+pub fn solve_transient_heat(
+    mesh: &Mesh,
+    opts: &TransientHeatOptions,
+    initial: &[f64],
+    source: impl Fn(&[f64], f64) -> f64,
+    dirichlet: &[(usize, f64)],
+) -> Result<Vec<(f64, Vec<f64>)>, ThermalError> {
+    let n = mesh.node_count();
+    if initial.len() != n {
+        return Err(ThermalError::InvalidInput(format!(
+            "initial field has {} entries, mesh has {n} nodes",
+            initial.len()
+        )));
+    }
+    if !(opts.dt.is_finite() && opts.dt > 0.0) {
+        return Err(ThermalError::InvalidInput(format!(
+            "dt must be finite and positive (got {})",
+            opts.dt
+        )));
+    }
+    if !(0.0..=1.0).contains(&opts.theta) {
+        return Err(ThermalError::InvalidInput(format!(
+            "theta must be in [0, 1] (got {})",
+            opts.theta
+        )));
+    }
+    if mesh.elements.is_empty() {
+        return Err(ThermalError::InvalidInput("mesh has no elements".into()));
+    }
+    if let Some(&(d, _)) = dirichlet.iter().find(|(d, _)| *d >= n) {
+        return Err(ThermalError::InvalidInput(format!(
+            "Dirichlet DOF {d} is out of range for {n} nodes"
+        )));
+    }
+
+    let k_coo = try_assemble(mesh, 1, |eid, m| {
+        poisson_element_matrix(m, eid, opts.conductivity, opts.quad_order)
+    })?;
+    let c_coo = try_assemble(mesh, 1, |eid, m| {
+        heat_capacity_element_matrix(m, eid, opts.rho_c, opts.quad_order)
+    })?;
+    let (dt, th) = (opts.dt, opts.theta);
+
+    // lhs = C/dt + th*K
+    let mut lhs = tpt_fem_sparse::Coo::new();
+    for i in 0..c_coo.rows.len() {
+        lhs.push(c_coo.rows[i], c_coo.cols[i], c_coo.vals[i] / dt);
+    }
+    for i in 0..k_coo.rows.len() {
+        lhs.push(k_coo.rows[i], k_coo.cols[i], th * k_coo.vals[i]);
+    }
+    // rhs operator = C/dt - (1-th)*K, applied by matvec.
+    let mut rop = tpt_fem_sparse::Coo::new();
+    for i in 0..c_coo.rows.len() {
+        rop.push(c_coo.rows[i], c_coo.cols[i], c_coo.vals[i] / dt);
+    }
+    for i in 0..k_coo.rows.len() {
+        rop.push(k_coo.rows[i], k_coo.cols[i], -(1.0 - th) * k_coo.vals[i]);
+    }
+    let rop = rop.to_csr();
+
+    let load = |t: f64| -> Result<Vec<f64>, ThermalError> {
+        let mut f = vec![0.0; n];
+        for eid in 0..mesh.elements.len() {
+            let fe = poisson_source_vector(mesh, eid, |x| source(x, t), opts.quad_order)?;
+            for (i, &node) in mesh.elements[eid].nodes.iter().enumerate() {
+                f[node] += fe[i];
+            }
+        }
+        Ok(f)
+    };
+
+    let mut temp = initial.to_vec();
+    for &(d, v) in dirichlet {
+        temp[d] = v;
+    }
+    let mut history = Vec::with_capacity(opts.nsteps + 1);
+    history.push((0.0, temp.clone()));
+    let mut f_prev = load(0.0)?;
+    for step in 1..=opts.nsteps {
+        let t = step as f64 * dt;
+        let f_next = load(t)?;
+        let mut rhs = rop.matvec(&temp);
+        rhs.truncate(n);
+        for i in 0..n {
+            rhs[i] += th * f_next[i] + (1.0 - th) * f_prev[i];
+        }
+        temp = solve_with_dirichlet(&lhs, &rhs, dirichlet)?;
+        history.push((t, temp.clone()));
+        f_prev = f_next;
+    }
+    Ok(history)
+}
+
 /// Solve the steady Poisson/heat-conduction problem.
 ///
 /// * `conductivity` — constant scalar `k`.
@@ -281,6 +475,75 @@ where
 mod tests {
     use super::*;
     use tpt_fem_mesh::{CellType, MeshBuilder};
+
+    fn rod(nx: usize) -> Mesh {
+        let mut b = MeshBuilder::new();
+        let nodes: Vec<usize> = (0..=nx)
+            .map(|i| b.add_node(vec![i as f64 / nx as f64]))
+            .collect();
+        for w in nodes.windows(2) {
+            b.add_element(CellType::Line, vec![w[0], w[1]]);
+        }
+        b.build()
+    }
+
+    #[test]
+    fn transient_heat_matches_analytic_decay() {
+        // u_t = u_xx, u(0)=u(1)=0, u0 = sin(pi x)  =>  u = exp(-pi^2 t) sin(pi x).
+        let nx = 40;
+        let mesh = rod(nx);
+        let pi = std::f64::consts::PI;
+        let u0: Vec<f64> = (0..=nx)
+            .map(|i| (pi * i as f64 / nx as f64).sin())
+            .collect();
+        let opts = TransientHeatOptions {
+            dt: 0.002,
+            nsteps: 50,
+            theta: 0.5,
+            ..TransientHeatOptions::default()
+        };
+        let hist =
+            solve_transient_heat(&mesh, &opts, &u0, |_, _| 0.0, &[(0, 0.0), (nx, 0.0)]).unwrap();
+        let (t, u) = hist.last().unwrap();
+        let decay = (-pi * pi * t).exp();
+        let mid = nx / 2;
+        assert!((u[mid] - decay).abs() < 2e-3, "{} vs {}", u[mid], decay);
+        // Monotone decay in time at the midpoint.
+        assert!(hist.windows(2).all(|w| w[1].1[mid] <= w[0].1[mid] + 1e-12));
+    }
+
+    #[test]
+    fn transient_heat_reaches_steady_state_with_source() {
+        // u_t = u_xx + 1, u(0)=u(1)=0 relaxes to 0.5 x (1 - x).
+        let nx = 20;
+        let mesh = rod(nx);
+        let opts = TransientHeatOptions {
+            dt: 0.05,
+            nsteps: 100,
+            theta: 1.0,
+            ..TransientHeatOptions::default()
+        };
+        let u0 = vec![0.0; nx + 1];
+        let hist =
+            solve_transient_heat(&mesh, &opts, &u0, |_, _| 1.0, &[(0, 0.0), (nx, 0.0)]).unwrap();
+        let u = &hist.last().unwrap().1;
+        let x = 0.5;
+        assert!((u[nx / 2] - 0.5 * x * (1.0 - x)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn transient_heat_rejects_bad_input() {
+        let mesh = rod(4);
+        let ok = TransientHeatOptions::default();
+        let u0 = vec![0.0; 5];
+        let none = |_: &[f64], _: f64| 0.0;
+        assert!(solve_transient_heat(&mesh, &ok, &[0.0; 3], none, &[]).is_err());
+        let bad_dt = TransientHeatOptions { dt: 0.0, ..ok };
+        assert!(solve_transient_heat(&mesh, &bad_dt, &u0, none, &[]).is_err());
+        let bad_theta = TransientHeatOptions { theta: 1.5, ..ok };
+        assert!(solve_transient_heat(&mesh, &bad_theta, &u0, none, &[]).is_err());
+        assert!(solve_transient_heat(&mesh, &ok, &u0, none, &[(99, 0.0)]).is_err());
+    }
 
     #[test]
     fn poisson_1d_quadratic_source() {

@@ -10,7 +10,9 @@
 //!   cantilever (`tpt-fem-topopt::topopt_simp`), exported as a nodal density
 //!   field.
 //! * `mesh info` — print summary statistics about a mesh file.
-//! * `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
+//! * `mesh convert` — convert between mesh formats; the output format follows
+//!   the file extension: `.vtk` (default), `.msh` (Gmsh 4.1), `.inp` (Abaqus),
+//!   `.ex`/`.ex2`/`.e` (Exodus II) or `.csv` (node coordinates).
 //!
 //! Error messages reuse the `Display` impls from the core crates, so malformed
 //! input reports a human-readable cause rather than a panic.
@@ -905,7 +907,28 @@ fn mesh_info(path: &PathBuf) -> Result<(), Err> {
 
 fn mesh_convert(input: &PathBuf, output: &PathBuf) -> Result<(), Err> {
     let mesh = load_mesh(input)?;
-    write_vtk(&mesh, output)?;
+    let ext = output
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "msh" => {
+            let text = mesh
+                .to_msh_string()
+                .map_err(|e| Error::Msg(format!("gmsh export: {e}")))?;
+            std::fs::write(output, text)?;
+        }
+        "csv" => {
+            let text = mesh
+                .nodal_csv(&[])
+                .map_err(|e| Error::Msg(format!("csv export: {e}")))?;
+            std::fs::write(output, text)?;
+        }
+        "inp" => tpt_fem::write_inp(&mesh, output)?,
+        "ex" | "ex2" | "e" => tpt_fem::write_exodus(&mesh, output)?,
+        _ => write_vtk(&mesh, output)?,
+    }
     println!(
         "Converted {} nodes / {} elements -> {}",
         mesh.node_count(),
@@ -1021,6 +1044,27 @@ $EndElements
         assert!(meta.len() > 0);
         let _ = std::fs::remove_file(&msh);
         let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn mesh_convert_picks_format_from_extension() {
+        let msh = write_temp("tpt_fem_cli_convert_fmt_in.msh", TRI_MSH);
+        let n = load_mesh(&msh).unwrap().node_count();
+        for ext in ["msh", "csv", "inp", "ex2"] {
+            let out = std::env::temp_dir().join(format!("tpt_fem_cli_convert_fmt_out.{ext}"));
+            mesh_convert(&msh, &out).unwrap_or_else(|e| panic!("convert to {ext}: {e}"));
+            assert!(std::fs::metadata(&out).unwrap().len() > 0, "{ext} empty");
+            if ext == "msh" {
+                // Round-trips through the Gmsh reader.
+                assert_eq!(load_mesh(&out).unwrap().node_count(), n);
+            }
+            if ext == "csv" {
+                let text = std::fs::read_to_string(&out).unwrap();
+                assert_eq!(text.lines().count(), n + 1);
+            }
+            let _ = std::fs::remove_file(&out);
+        }
+        let _ = std::fs::remove_file(&msh);
     }
 
     #[test]

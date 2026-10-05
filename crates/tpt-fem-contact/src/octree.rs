@@ -141,7 +141,7 @@ fn nearest_in(node: &OctNode, q: &[f64], best: &mut Option<(usize, f64)>) {
         None => {
             for (payload, p) in &node.points {
                 let d = dist(q, p);
-                if best.map_or(true, |(_, bd)| d < bd) {
+                if best.is_none_or(|(_, bd)| d < bd) {
                     *best = Some((*payload, d));
                 }
             }
@@ -226,7 +226,7 @@ mod tests {
             let mut exp: Option<(usize, f64)> = None;
             for (i, (_, p)) in b.iter().enumerate() {
                 let d = dist(&q, p);
-                if exp.map_or(true, |(_, bd)| d < bd) {
+                if exp.is_none_or(|(_, bd)| d < bd) {
                     exp = Some((i, d));
                 }
             }

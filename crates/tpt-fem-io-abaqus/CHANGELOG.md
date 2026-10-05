@@ -5,6 +5,12 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- An element record that appears before any `*ELEMENT` type line is rejected with `InpError::Parse` instead of hitting an `unwrap` on untrusted input.
+
 ## [0.1.0] - 2026-08-23
 
 ### Added

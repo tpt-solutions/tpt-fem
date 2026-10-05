@@ -9,12 +9,6 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
-- `ElasticityError` surfaced when a model/dimension combination has no
-  constitutive definition (e.g. `PlaneStress` on a 3-D mesh), replacing the
-  previous `panic!` in `strain_dim` / `constitutive` / `b_matrix`.
-- `elasticity_element_matrix` now returns `Result<_, ElasticityError>`; the
-  assembly primitive gained a fallible `try_assemble` so element-matrix failures
-  propagate instead of panicking.
 - `ElasticityError::Quadrature` variant, and `elasticity_body_vector`,
   `elasticity_mass_matrix`, `elasticity_lumped_mass` now return
   `Result<_, ElasticityError>` instead of panicking when `quad_order` (or,
@@ -40,5 +34,18 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `solve_modal` modal analysis via `tpt-fem-eigen`.
 - 2-D Euler–Bernoulli beam support: `BeamSection2D`, `beam2d_element_matrix`,
   `beam2d_consistent_mass`, `solve_frame2d`.
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Added
+
+- `ElasticityError` surfaced when a model/dimension combination has no
+  constitutive definition (e.g. `PlaneStress` on a 3-D mesh), replacing the
+  previous `panic!` in `strain_dim` / `constitutive` / `b_matrix`.
+- `elasticity_element_matrix` now returns `Result<_, ElasticityError>`; the
+  assembly primitive gained a fallible `try_assemble` so element-matrix failures
+  propagate instead of panicking.
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-elasticity-0.1.0

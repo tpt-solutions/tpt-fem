@@ -1222,61 +1222,66 @@ release is a single pass.*
 
 ### 16a — Panic / API hardening (breaking changes belong in 0.2.0)
 
-- [ ] `tpt-fem-coupling::ref_quad` returns `Result` but still calls the
+- [x] `tpt-fem-coupling::ref_quad` returns `Result` but still calls the
       panicking `gauss_legendre` — switch to `try_gauss_legendre(order)?`.
-- [ ] `tpt-fem-fluid`: unsupported-cell `panic!`s (7 sites) and
+- [x] `tpt-fem-fluid`: unsupported-cell `panic!`s (7 sites) and
       `stokes_dofmap`'s `mesh.elements[0]` → return `FluidError`.
-- [ ] `tpt-fem-porous`: unsupported-cell `panic!`s, `.expect("terzaghi solve")`,
+- [x] `tpt-fem-porous`: unsupported-cell `panic!`s, `.expect("terzaghi solve")`,
       and the `partial_cmp().unwrap()` → `Result`/`PorousError`.
-- [ ] `tpt-fem-dynamic::newmark`: `.expect("... must be invertible")` →
+- [x] `tpt-fem-dynamic::newmark`: `.expect("... must be invertible")` →
       `Result<_, DynamicError>` (**breaking**, so it ships in 0.2.0).
-- [ ] `tpt-fem-assembly`: `face_quad`/`surface` panics and the
+- [x] `tpt-fem-assembly`: `face_quad`/`surface` panics and the
       `bcs.iter().find(..).unwrap()` in the Dirichlet reduction.
-- [ ] `tpt-fem-contact` octree: NaN-safe comparison (`total_cmp`).
-- [ ] `tpt-fem-io-abaqus:223`: `element_type.unwrap()` on untrusted input.
-- [ ] `tpt-fem-mesh-gen` / `tpt-fem-mesh` / `tpt-fem-composite` /
-      `tpt-fem-amr` / `tpt-fem-element` remaining production `unwrap`s:
-      remove or document as invariants.
+- [x] `tpt-fem-contact` octree: NaN-safe comparison (`total_cmp`).
+- [x] `tpt-fem-io-abaqus:223`: `element_type.unwrap()` on untrusted input.
+- [x] `tpt-fem-mesh-gen` / `tpt-fem-composite` `unwrap`s removed;
+      `tpt-fem-mesh` / `tpt-fem-amr` / `tpt-fem-element` ones are provable
+      local invariants, already documented as contracted preconditions.
 
 ### 16b — MSRV / toolchain
 
-- [ ] Declared `rust-version = "1.75"` is false (the locked dependency tree
+- [x] Declared `rust-version = "1.75"` is false (the locked dependency tree
       needs ≥ 1.85 — `clap_lex` edition 2024). Set the real MSRV and add an
       MSRV CI job so it stays true.
 
 ### 16c — Automation
 
-- [ ] CI: `tpt-fem-wasm` build job.
-- [ ] CI: `cargo package` dry-run for every publishable crate (catches
+- [x] CI: `tpt-fem-wasm` build job.
+- [x] CI: `cargo package` dry-run for every publishable crate (catches
       metadata rejections such as the 0.1.0 keyword-length failure).
-- [ ] CI: `cargo semver-checks` (advisory on PRs).
-- [ ] CI: unused-dependency check (`cargo-machete`).
-- [ ] CI: CHANGELOG guard — a crate whose `src/` changed must touch its
+- [x] CI: `cargo semver-checks` (advisory on PRs).
+- [x] CI: unused-dependency check (`cargo-machete`).
+- [x] CI: CHANGELOG guard — a crate whose `src/` changed must touch its
       `CHANGELOG.md`.
-- [ ] CI: scheduled (weekly) fuzz run.
-- [ ] CI: manifest check that the non-workspace crates (py/capi/wasm) pin a
+- [x] CI: scheduled (weekly) fuzz run.
+- [x] CI: manifest check that the non-workspace crates (py/capi/wasm) pin a
       `tpt-fem*` version that matches the workspace.
-- [ ] Commit `Cargo.lock` (repo ships a binary + cdylibs; reproducible CI).
-- [ ] `Justfile`: `release-check` recipe running the PUBLISHING.md gates.
-- [ ] Repo hygiene: stray `*.log`/`*.vtk` outputs at the repo root.
-- [ ] `deny.toml`: drop the stale `RUSTSEC-2024-0375` ignore.
+- [x] Commit `Cargo.lock` (repo ships a binary + cdylibs; reproducible CI).
+- [x] `Justfile`: `release-check` recipe running the PUBLISHING.md gates.
+- [x] Repo hygiene: the root `*.log`/`*.vtk` outputs are untracked and
+      git-ignored (nothing tracked); left on disk, delete locally if unwanted.
+- [x] `deny.toml`: drop the stale `RUSTSEC-2024-0375` ignore.
 
 ### 16d — Changelogs / release docs
 
-- [ ] `tpt-fem-coupling` CHANGELOG entry for the `Result` change.
-- [ ] `tpt-fem-wasm` CHANGELOG.
-- [ ] Changelog entries for every crate touched by 16a.
-- [ ] `docs/MIGRATING-0.2.md`: before/after for each breaking `Result` change.
-- [ ] Error-handling guide section in `docs/README.md`.
+- [x] `tpt-fem-coupling` CHANGELOG entry for the `Result` change.
+- [x] `tpt-fem-wasm` CHANGELOG.
+- [x] Changelog entries for every crate touched by 16a.
+- [x] `docs/MIGRATING-0.2.md`: before/after for each breaking `Result` change.
+- [x] Error-handling guide section in `docs/README.md`.
 
 ### 16e — Features / usability
 
-- [ ] `tpt-fem-sparse`: pure-Rust sparse iterative solver (Jacobi-preconditioned
+- [x] `tpt-fem-sparse`: pure-Rust sparse iterative solver (Jacobi-preconditioned
       CG) so SPD systems scale without SuiteSparse.
 - [ ] CLI/Python exposure for the remaining Phase 12+ crates (`dynamic`,
       `plasticity`, `hyperelastic`, `fluid`, `porous`, `contact`, `coupling`,
-      `composite`) — tracked, staged after 0.2.0 unless noted below.
-- [ ] Transient thermal time stepping.
-- [ ] Extra export formats (CSV, Gmsh writer).
-- [ ] Python `.pyi` stubs updated for the 0.2 surface.
-- [ ] C API release artifacts workflow.
+      `composite`) — **not done**: each needs a config schema / binding design,
+      so it is deliberately staged after 0.2.0.
+- [x] Transient thermal time stepping.
+- [x] Extra export formats: CSV (`Mesh::nodal_csv`) and Gmsh 4.1 writer
+      (`Mesh::to_msh_string`), wired into `tpt-fem mesh convert` by extension.
+      STL / XDMF-HDF5 remain unimplemented (no demand yet).
+- [x] Python `.pyi` stubs: no Python-facing API changed in 0.2 (the stubs
+      already cover `topopt_cantilever`); nothing to update.
+- [x] C API release artifacts workflow.

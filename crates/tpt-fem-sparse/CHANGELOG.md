@@ -9,11 +9,7 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
-- `Csr::matvec` — matrix–vector product on the compressed rows: the
-  conversion cost is paid once by the caller instead of per call, and the
-  row-contiguous accumulation loop is auto-vectoriser friendly. Intended for
-  time-stepping / iterative loops that previously re-ran `to_csr()` on every
-  matvec.
+- `solve_cg` / `CgOptions` / `CgSolution` — Jacobi-preconditioned conjugate-gradient solver for symmetric positive-definite systems. Pure Rust, `O(nnz)` memory and work per iteration, so SPD systems scale far beyond the dense-LU `solve` without needing the `russell` SuiteSparse/MUMPS toolchain.
 
 ## [0.1.0] - 2026-08-23
 
@@ -34,5 +30,17 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   in-house dense LU, dropping the Apache-2.0-only `faer` dependency.
 - `tpt-math-linalg-dense` dependency now points at the published `0.1.0`
   crates.io release instead of the git/vendored copy.
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Added
+
+- `Csr::matvec` — matrix–vector product on the compressed rows: the
+  conversion cost is paid once by the caller instead of per call, and the
+  row-contiguous accumulation loop is auto-vectoriser friendly. Intended for
+  time-stepping / iterative loops that previously re-ran `to_csr()` on every
+  matvec.
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-sparse-0.1.0

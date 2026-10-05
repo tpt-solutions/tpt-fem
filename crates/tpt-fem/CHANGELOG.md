@@ -5,6 +5,21 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking (via re-exports):** the umbrella re-exports the breaking `Result`
+  signature changes in `tpt-fem-element`, `-assembly`, `-thermal`,
+  `-elasticity`, `-eigen`, `-contact`, `-dynamic`, `-fluid`, `-porous`,
+  `-modal` and `-coupling`. See `docs/MIGRATING-0.2.md`.
+- Minimum supported Rust version is now 1.85 (the previously declared 1.75
+  could not build the dependency tree).
+
+### Added
+
+- `tpt_fem::Error` gains `From` conversions for the new per-crate error enums.
+
 ## [0.1.0] - 2026-08-23
 
 ### Added

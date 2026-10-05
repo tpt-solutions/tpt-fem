@@ -7,18 +7,16 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-### Added
-
-- `try_assemble`, a fallible variant of `assemble` whose element-matrix closure may
-  fail (e.g. an invalid model/dimension combination), propagating the first error
-  instead of panicking.
-
 ### Changed
 
 - **Breaking:** `apply_neumann_order` / `apply_robin_order` now return
   `Result<(), SparseError>` instead of panicking when `order` is outside
   `tpt-fem-quadrature`'s supported `1..=5` range. `apply_neumann` /
   `apply_robin` (the fixed-order convenience wrappers) are unchanged.
+
+### Fixed
+
+- `reduce_system` looks up prescribed DOF values through a `HashMap` instead of a linear scan of the BC list per matrix entry (removes an `unwrap` and an `O(nnz · n_bc)` cost on large Dirichlet sets); a DOF listed twice now uses the last value.
 
 ## [0.1.0] - 2026-08-13
 
@@ -32,5 +30,15 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `apply_robin` / `apply_robin_order` convective boundary contributions.
 - Dimension-agnostic support for all five linear element types and arbitrary
   DOFs-per-node.
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Added
+
+- `try_assemble`, a fallible variant of `assemble` whose element-matrix closure may
+  fail (e.g. an invalid model/dimension combination), propagating the first error
+  instead of panicking.
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-assembly-0.1.0

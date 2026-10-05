@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "science", "simulation"]
 [[bin]]
 name = "tpt-fem"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 tpt-fem = { workspace = true, features = ["amr", "topopt"] }

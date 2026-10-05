@@ -221,6 +221,43 @@ impl std::fmt::Display for MeshError {
 
 impl std::error::Error for MeshError {}
 
+/// Errors from the mesh/field export helpers ([`Mesh::to_msh_string`],
+/// [`Mesh::nodal_csv`]).
+#[derive(Debug, PartialEq)]
+pub enum ExportError {
+    /// A nodal field's length is not a multiple of the node count.
+    FieldLength {
+        /// The field's name.
+        name: String,
+        /// Number of values supplied.
+        len: usize,
+        /// Number of nodes in the mesh.
+        node_count: usize,
+    },
+    /// An element references a node index beyond the node list.
+    BadConnectivity(ElementId),
+}
+
+impl std::fmt::Display for ExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExportError::FieldLength {
+                name,
+                len,
+                node_count,
+            } => write!(
+                f,
+                "field '{name}' has {len} values, which is not a multiple of the {node_count} mesh nodes"
+            ),
+            ExportError::BadConnectivity(e) => {
+                write!(f, "element {e} references a node outside the mesh")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExportError {}
+
 impl Mesh {
     /// Number of nodes.
     pub fn node_count(&self) -> usize {
@@ -417,6 +454,148 @@ impl Mesh {
             }
         }
         Ok(())
+    }
+
+    /// Serialise the mesh as an ASCII Gmsh MSH 4.1 file (the inverse of
+    /// [`Mesh::from_msh_bytes`]).
+    ///
+    /// Elements are grouped into one block per cell type; P2 connectivity is
+    /// reordered from `tpt-fem-element`'s reference order back to Gmsh's. Node
+    /// and element regions (physical-group tags) are not written, and nodes are
+    /// emitted as one block of the mesh's highest element dimension.
+    pub fn to_msh_string(&self) -> Result<String, ExportError> {
+        use std::fmt::Write as _;
+        let node_count = self.nodes.len();
+        for e in &self.elements {
+            if e.nodes.iter().any(|&n| n >= node_count) {
+                return Err(ExportError::BadConnectivity(e.id));
+            }
+        }
+        let dim_of = |c: CellType| match c {
+            CellType::Line => 1,
+            CellType::Tri | CellType::Quad | CellType::Tri6 | CellType::Quad8 | CellType::Quad9 => {
+                2
+            }
+            _ => 3,
+        };
+        let gmsh_type = |c: CellType| -> u32 {
+            match c {
+                CellType::Line => 1,
+                CellType::Tri => 2,
+                CellType::Quad => 3,
+                CellType::Tet => 4,
+                CellType::Hex => 5,
+                CellType::Tri6 => 9,
+                CellType::Quad9 => 10,
+                CellType::Tet10 => 11,
+                CellType::Hex27 => 12,
+                CellType::Quad8 => 16,
+                CellType::Hex20 => 17,
+            }
+        };
+        let node_dim = self
+            .elements
+            .iter()
+            .map(|e| dim_of(e.cell_type))
+            .max()
+            .unwrap_or(3);
+
+        let mut out = String::from("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n");
+        let _ = writeln!(out, "$Nodes");
+        let _ = writeln!(out, "1 {node_count} 1 {}", node_count.max(1));
+        let _ = writeln!(out, "{node_dim} 1 0 {node_count}");
+        for i in 0..node_count {
+            let _ = writeln!(out, "{}", i + 1);
+        }
+        for n in &self.nodes {
+            let c = |k: usize| n.coords.get(k).copied().unwrap_or(0.0);
+            let _ = writeln!(out, "{:e} {:e} {:e}", c(0), c(1), c(2));
+        }
+        out.push_str("$EndNodes\n");
+
+        // One block per cell type, in order of first appearance.
+        let mut order: Vec<CellType> = Vec::new();
+        for e in &self.elements {
+            if !order.contains(&e.cell_type) {
+                order.push(e.cell_type);
+            }
+        }
+        let n_el = self.elements.len();
+        let _ = writeln!(out, "$Elements");
+        let _ = writeln!(out, "{} {n_el} 1 {}", order.len(), n_el.max(1));
+        let mut tag = 1usize;
+        for (bi, cell) in order.iter().enumerate() {
+            let members: Vec<&Element> = self
+                .elements
+                .iter()
+                .filter(|e| e.cell_type == *cell)
+                .collect();
+            let _ = writeln!(
+                out,
+                "{} {} {} {}",
+                dim_of(*cell),
+                bi + 1,
+                gmsh_type(*cell),
+                members.len()
+            );
+            for e in members {
+                let nodes: Vec<NodeId> = if cell.is_p2() {
+                    gmsh_order_p2(*cell, &e.nodes)
+                } else {
+                    e.nodes.clone()
+                };
+                let _ = write!(out, "{tag}");
+                for n in nodes {
+                    let _ = write!(out, " {}", n + 1);
+                }
+                out.push('\n');
+                tag += 1;
+            }
+        }
+        out.push_str("$EndElements\n");
+        Ok(out)
+    }
+
+    /// Nodal fields as CSV: a header `node,x,y,z,<fields...>` then one row per
+    /// node. Each `(name, values)` field holds `node_count * k` values (`k`
+    /// components per node, interleaved); `k > 1` fields expand to
+    /// `name_0, name_1, ...` columns.
+    pub fn nodal_csv(&self, fields: &[(&str, &[f64])]) -> Result<String, ExportError> {
+        use std::fmt::Write as _;
+        let n = self.nodes.len();
+        let mut comps = Vec::with_capacity(fields.len());
+        for (name, vals) in fields {
+            if n == 0 || vals.len() % n != 0 {
+                return Err(ExportError::FieldLength {
+                    name: (*name).to_string(),
+                    len: vals.len(),
+                    node_count: n,
+                });
+            }
+            comps.push(vals.len() / n);
+        }
+        let mut out = String::from("node,x,y,z");
+        for ((name, _), k) in fields.iter().zip(&comps) {
+            if *k == 1 {
+                let _ = write!(out, ",{name}");
+            } else {
+                for c in 0..*k {
+                    let _ = write!(out, ",{name}_{c}");
+                }
+            }
+        }
+        out.push('\n');
+        for (i, node) in self.nodes.iter().enumerate() {
+            let c = |k: usize| node.coords.get(k).copied().unwrap_or(0.0);
+            let _ = write!(out, "{i},{},{},{}", c(0), c(1), c(2));
+            for ((_, vals), k) in fields.iter().zip(&comps) {
+                for j in 0..*k {
+                    let _ = write!(out, ",{}", vals[i * k + j]);
+                }
+            }
+            out.push('\n');
+        }
+        Ok(out)
     }
 
     /// Node ids whose coordinate along `axis` (`0` = x, `1` = y, `2` = z) is
@@ -667,6 +846,32 @@ fn p2_gmsh_reference(cell: CellType) -> &'static [&'static [f64]] {
         ],
         _ => &[],
     }
+}
+
+/// Inverse of [`reorder_p2`]: place each node of a reference-ordered P2
+/// connectivity list at its Gmsh position.
+fn gmsh_order_p2(cell: CellType, our_nodes: &[NodeId]) -> Vec<NodeId> {
+    use tpt_fem_element::ReferenceElement;
+    let our_ref: Vec<Vec<f64>> = match cell {
+        CellType::Tri6 => tpt_fem_element::Tri6::nodes(),
+        CellType::Quad8 => tpt_fem_element::Quad8::nodes(),
+        CellType::Quad9 => tpt_fem_element::Quad9::nodes(),
+        CellType::Tet10 => tpt_fem_element::Tet10::nodes(),
+        CellType::Hex20 => tpt_fem_element::Hex20::nodes(),
+        CellType::Hex27 => tpt_fem_element::Hex27::nodes(),
+        _ => return our_nodes.to_vec(),
+    };
+    let gmsh_ref = p2_gmsh_reference(cell);
+    gmsh_ref
+        .iter()
+        .map(|g| {
+            our_ref
+                .iter()
+                .position(|o| coord_eq(o, g))
+                .map(|oi| our_nodes[oi])
+                .unwrap_or(our_nodes[0])
+        })
+        .collect()
 }
 
 fn coord_eq(a: &[f64], b: &[f64]) -> bool {
@@ -941,6 +1146,54 @@ $EndElements
         elements_section.push_str("\n$EndElements\n");
 
         format!("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n{nodes_section}{elements_section}")
+    }
+
+    #[test]
+    fn msh_round_trips_linear_and_p2() {
+        let mut b = MeshBuilder::new();
+        let ids: Vec<NodeId> = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
+            .iter()
+            .map(|c| b.add_node(vec![c[0], c[1], 0.0]))
+            .collect();
+        b.add_element(CellType::Tri, vec![ids[0], ids[1], ids[2]]);
+        b.add_element(CellType::Tri, vec![ids[1], ids[3], ids[2]]);
+        let mesh = b.build();
+        let text = mesh.to_msh_string().unwrap();
+        let back = Mesh::from_msh_bytes(text.as_bytes()).unwrap();
+        assert_eq!(back.node_count(), 4);
+        assert_eq!(back.element_count(), 2);
+        for (a, c) in mesh.elements.iter().zip(&back.elements) {
+            assert_eq!(a.cell_type, c.cell_type);
+            let pa: Vec<&[f64]> = a.nodes.iter().map(|&n| mesh.node_coords(n)).collect();
+            let pc: Vec<&[f64]> = c.nodes.iter().map(|&n| back.node_coords(n)).collect();
+            assert_eq!(pa, pc);
+        }
+
+        // P2: import a Gmsh-ordered Tri6, write it back out, re-import: identical.
+        let p2 = Mesh::from_msh_bytes(p2_msh(CellType::Tri6).as_bytes()).unwrap();
+        let again = Mesh::from_msh_bytes(p2.to_msh_string().unwrap().as_bytes()).unwrap();
+        assert_eq!(again.elements[0].cell_type, CellType::Tri6);
+        for (a, c) in p2.elements[0].nodes.iter().zip(&again.elements[0].nodes) {
+            let (x, y) = (p2.node_coords(*a), again.node_coords(*c));
+            assert!((0..3).all(|k| (x[k] - y[k]).abs() < 1e-9), "{x:?} vs {y:?}");
+        }
+    }
+
+    #[test]
+    fn nodal_csv_layout_and_errors() {
+        let mut b = MeshBuilder::new();
+        let a = b.add_node(vec![0.0, 0.0, 0.0]);
+        let c = b.add_node(vec![1.0, 2.0, 3.0]);
+        b.add_element(CellType::Line, vec![a, c]);
+        let mesh = b.build();
+        let scalar = [10.0, 20.0];
+        let vector = [1.0, 2.0, 3.0, 4.0];
+        let csv = mesh.nodal_csv(&[("T", &scalar), ("u", &vector)]).unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "node,x,y,z,T,u_0,u_1");
+        assert_eq!(lines[1], "0,0,0,0,10,1,2");
+        assert_eq!(lines[2], "1,1,2,3,20,3,4");
+        assert!(mesh.nodal_csv(&[("bad", &[1.0, 2.0, 3.0])]).is_err());
     }
 
     #[test]

@@ -7,26 +7,9 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-### Added
-
-- `modal_frequency_response` — harmonic frequency-response analysis by modal
-  superposition: solves the `K x = ω² M x` eigenproblem with
-  `tpt-fem-eigen`'s generalized shift-invert Lanczos and evaluates the
-  damped modal sum over a frequency sweep, returning real/imaginary
-  displacement amplitudes (`ModalFrequencyResponse`). The frequency-domain
-  counterpart of stepping `newmark` to steady state.
-- `DynamicError::Sparse` / `DynamicError::InvalidInput` variants for the new
-  workflow's failure modes.
-
 ### Changed
 
-- `newmark` / `central_difference` now convert the constant `C`/`K`/`M`
-  operators to CSR once per run and use `Csr::matvec` inside the step loop,
-  instead of re-running the `Coo`→CSR conversion on every matvec (the
-  `coo_matvec` performance smell flagged in todo.md 13d). `coo_matvec` itself
-  now delegates to `Csr::matvec`; the CFL row-sum guard also uses the CSR
-  row structure instead of a full triplet scan per DOF. Results are
-  unchanged (all integrator tests pass bit-for-bit within tolerance).
+- **Breaking:** `newmark` now returns `Result<Vec<(f64, Vec<f64>)>, DynamicError>`: a singular mass matrix or effective stiffness is reported as `DynamicError::Sparse`, and a non-finite or non-positive `dt` / `beta` as `DynamicError::InvalidInput`, instead of panicking.
 
 ## [0.1.0] - 2026-08-20
 
@@ -39,5 +22,30 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `newmark` — implicit Newmark-beta integration of `M·ü + C·v + K·u = f(t)`.
 - `CentralOptions` — `dt` option for the explicit integrator (with default).
 - `central_difference` — explicit central-difference integration (mass lumped internally).
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Added
+
+- `modal_frequency_response` — harmonic frequency-response analysis by modal
+  superposition: solves the `K x = ω² M x` eigenproblem with
+  `tpt-fem-eigen`'s generalized shift-invert Lanczos and evaluates the
+  damped modal sum over a frequency sweep, returning real/imaginary
+  displacement amplitudes (`ModalFrequencyResponse`). The frequency-domain
+  counterpart of stepping `newmark` to steady state.
+- `DynamicError::Sparse` / `DynamicError::InvalidInput` variants for the new
+  workflow's failure modes.
+
+#### Changed
+
+- `newmark` / `central_difference` now convert the constant `C`/`K`/`M`
+  operators to CSR once per run and use `Csr::matvec` inside the step loop,
+  instead of re-running the `Coo`→CSR conversion on every matvec (the
+  `coo_matvec` performance smell flagged in todo.md 13d). `coo_matvec` itself
+  now delegates to `Csr::matvec`; the CFL row-sum guard also uses the CSR
+  row structure instead of a full triplet scan per DOF. Results are
+  unchanged (all integrator tests pass bit-for-bit within tolerance).
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-dynamic-0.1.0

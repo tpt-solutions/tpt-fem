@@ -72,6 +72,17 @@ The workspace is a layered finite-element-method core; each crate has its own
 - [tpt-fem-cli](../crates/tpt-fem-cli/README.md)
 - [tpt-fem-py](../crates/tpt-fem-py/README.md)
 
+## Error handling
+
+Public solvers return `Result` rather than panicking on bad input. Each crate
+has its own error enum (`SparseError`, `MeshError`, `ThermalError`,
+`ElasticityError`, `DynamicError`, `FluidError`, `PorousError`, `ContactError`,
+`CouplingError`, …), all implementing `std::error::Error`. The `tpt-fem`
+umbrella's `tpt_fem::Error` converts from every one of them (each behind its
+Cargo feature) plus `std::io::Error` and TOML errors, so application code can
+use one error type and `?` throughout. Upgrading from 0.1? See
+[MIGRATING-0.2.md](MIGRATING-0.2.md).
+
 ## End-to-end examples
 
 Runnable Rust examples under [`crates/tpt-fem/examples/`](../crates/tpt-fem/examples):

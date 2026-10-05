@@ -9,25 +9,7 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
-- `generalized_lanczos_eigs`: the shift-invert Lanczos now runs two full
-  reorthogonalization passes per step ("twice is enough"). With a single pass,
-  closely-clustered eigenvalues (Ritz targets separated by ~1e-6) lost basis
-  orthogonality and polluted the projected tridiagonal's extreme Ritz values
-  by ~1e-2; the clustered spectrum is now resolved to ~1e-12.
-
-### Fixed
-
-- `solve_shifted` (internal): Gaussian elimination now uses partial pivoting
-  and regularises collapsed pivots to `±1e-12`. Previously a shift placed at
-  or between clustered eigenvalues (near-singular `K - σM`) could produce
-  inf/NaN that poisoned the whole Lanczos recurrence.
-
-### Added
-
-- Regression tests `generalized_closely_clustered_eigenvalues` (six
-  eigenvalues packed into a ~4e-6 band, checked against the closed form) and
-  `generalized_shift_inside_cluster_is_accurate` (shift mid-cluster, stressing
-  the near-singular shift-invert solve).
+- **Breaking:** `lanczos_eigs` now returns `Result<Vec<(f64, Vec<f64>)>, SparseError>`: it reports an error when the projected tridiagonal eigensolve does not converge within its sweep budget, instead of silently returning fewer eigenpairs or an unconverged spectrum.
 
 ## [0.1.0] - 2026-08-13
 
@@ -39,5 +21,31 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `EigWhich` eigenvalue selection enum.
 - `lanczos_eigs` Lanczos tridiagonalisation eigensovle.
 - `generalized_lanczos_eigs` for the `K x = λ M x` eigenproblem.
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Changed
+
+- `generalized_lanczos_eigs`: the shift-invert Lanczos now runs two full
+  reorthogonalization passes per step ("twice is enough"). With a single pass,
+  closely-clustered eigenvalues (Ritz targets separated by ~1e-6) lost basis
+  orthogonality and polluted the projected tridiagonal's extreme Ritz values
+  by ~1e-2; the clustered spectrum is now resolved to ~1e-12.
+
+#### Fixed
+
+- `solve_shifted` (internal): Gaussian elimination now uses partial pivoting
+  and regularises collapsed pivots to `±1e-12`. Previously a shift placed at
+  or between clustered eigenvalues (near-singular `K - σM`) could produce
+  inf/NaN that poisoned the whole Lanczos recurrence.
+
+#### Added
+
+- Regression tests `generalized_closely_clustered_eigenvalues` (six
+  eigenvalues packed into a ~4e-6 band, checked against the closed form) and
+  `generalized_shift_inside_cluster_is_accurate` (shift mid-cluster, stressing
+  the near-singular shift-invert solve).
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-eigen-0.1.0

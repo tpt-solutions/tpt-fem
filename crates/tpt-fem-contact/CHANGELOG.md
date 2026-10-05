@@ -9,6 +9,31 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `ContactError` (with `From<SparseError>`), returned by `augmented_lagrangian`.
+
+### Changed
+
+- **Breaking:** `augmented_lagrangian` now returns `Result<(Vec<f64>, Vec<f64>), ContactError>` instead of panicking when the constraint solve fails or does not converge.
+
+### Fixed
+
+- Octree nearest-neighbour search no longer panics on NaN coordinates (`total_cmp` instead of `partial_cmp().unwrap()`).
+
+## [0.1.0] - 2026-08-20
+
+### Added
+
+- `ContactConstraint` — unilateral `x_dof ≥ lower` constraint on a global DOF.
+- `penalty_contact` — augments a base `Coo` with penalty stiffness `ε_N` and load `ε_N·lower`, returning `(Coo, Vec<f64>)`.
+- `augmented_lagrangian` — augmented-Lagrangian iteration (`λ ← max(0, λ + ε_N·(lower − x))`) returning `(Vec<f64> displacements, Vec<f64> multipliers)`.
+- `contact_pairs` — brute-force nearest-node pairing between two surfaces, returning `(node_a, idx_b, gap)` tuples.
+
+### Documented after release
+
+_These items were recorded under `[Unreleased]` but are already present in the published 0.1.0 tarball._
+
+#### Added
+
 - `Octree` — uniform octree over a fixed point set with pruned
   nearest-neighbour queries (O(log n) per query on evenly distributed
   points).
@@ -20,14 +45,5 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Regression tests: octree-vs-brute-force agreement on deterministic
   pseudo-random point clouds, 2-D/duplicate/empty edge cases, and full-pairing
   agreement of `contact_pairs_octree` with `contact_pairs`.
-
-## [0.1.0] - 2026-08-20
-
-### Added
-
-- `ContactConstraint` — unilateral `x_dof ≥ lower` constraint on a global DOF.
-- `penalty_contact` — augments a base `Coo` with penalty stiffness `ε_N` and load `ε_N·lower`, returning `(Coo, Vec<f64>)`.
-- `augmented_lagrangian` — augmented-Lagrangian iteration (`λ ← max(0, λ + ε_N·(lower − x))`) returning `(Vec<f64> displacements, Vec<f64> multipliers)`.
-- `contact_pairs` — brute-force nearest-node pairing between two surfaces, returning `(node_a, idx_b, gap)` tuples.
 
 [0.1.0]: https://github.com/tpt-solutions/tpt-fem/releases/tag/tpt-fem-contact-0.1.0

@@ -11,156 +11,154 @@ Out of scope for crates.io: `tpt-fem-py` (PyPI via maturin), `tpt-fem-wasm` and
 
 ## Release 0.2.0 — next round
 
-Baseline: the 0.1.0 publish (commit `9a5da2f`, 2026-08-23). Everything since
-(`git log 9a5da2f..HEAD`) is unreleased.
+Baseline: the 0.1.0 publish. **Verified against crates.io (2026-10-05):** the
+published 0.1.0 tarballs of all 27 crates are source-identical (ignoring line
+endings) to commit `9a5da2f`, so `git diff 9a5da2f..HEAD` is exactly what is
+unreleased. Pre-release code work is tracked in `todo.md` Phase 16.
 
 ### 1. Scope decisions
 
 | Item | Decision | Why |
 |------|----------|-----|
-| `tpt-fem-wasm` (new) | stay unpublished | `publish = false`; browser demo, built with wasm-pack |
-| `tpt-fem-capi` (new) | stay unpublished (for now) | `publish = false`, "dev-only this pass". To publish later: remove the flag, add `keywords`/`categories`, depend on the released `tpt-fem` 0.2, and make sure the committed cbindgen header is in the package (`cargo package --list`) |
-| `tpt-fem-py` | PyPI only | bump its `tpt-fem` pin to 0.2.0 so it builds against the release |
+| `tpt-fem-wasm` (new) | stay unpublished | `publish = false`; browser demo, built with wasm-pack; CI job `wasm-demo` |
+| `tpt-fem-capi` (new) | stay unpublished | `publish = false`; shipped as prebuilt libs + header via `.github/workflows/capi-release.yml` (tag `capi-v*`), which suits a C library better than crates.io |
+| `tpt-fem-py` | PyPI only | bump its `tpt-fem` pin to the released version; `maturin publish` workflow already exists |
+| MSRV | **1.85** | the old `rust-version = "1.75"` could not build the dependency tree; now enforced by the CI `msrv` job |
 
-**Versioning rule (0.x semver):** breaking API change → minor bump (0.1 → 0.2);
-additive/fix → patch (0.1.1). A dependency bumped to 0.2.0 can't be satisfied by
-`^0.1.0`, so every crate that depends on one must be bumped and republished too —
-otherwise the graph ends up with two copies of e.g. `tpt-fem-mesh` and the types
-don't match. Simplest policy: **every republished dependent goes to 0.2.0.**
+**Versioning rule (0.x semver).** Breaking public-API change → minor bump
+(0.1 → 0.2). Additive change or fix → patch (0.1 → 0.1.1). A crate whose own
+source did not change is **not** republished unless a type from a
+breaking-bumped dependency appears in its public API — a dependency pinned
+`^0.1.0` simply resolves to the published release. A crate whose only change is
+bumping an internal pin (no public API change) gets a patch release so the
+registry matches the repo.
 
-### 2. What changed and the bump it needs
+> `cargo semver-checks` is run in CI as an advisory job but **cannot see
+> return-type changes** (the main break in this release), so the bump table
+> below was derived by diffing public signatures by hand
+> (`git diff 9a5da2f..HEAD`). Re-derive it if more API changes land.
 
-Root causes of the cascade (from CHANGELOGs / API diff against `9a5da2f`):
+### 2. Bump table (derived from the code, not guessed)
 
-| Crate | Change | Bump |
-|-------|--------|------|
-| tpt-fem-quadrature | Keast4 tet table bug fix; new `try_gauss_legendre*` + `QuadratureError` | **0.1.1** (additive + fix) |
-| tpt-fem-eigen | Lanczos twice-is-enough reorthogonalization (behavioural fix only) | **0.1.1** |
-| tpt-fem-element | `line_rule`/`quad_rule`/`hex_rule` now return `Result` | **0.2.0** breaking |
-| tpt-fem-assembly | `apply_neumann_order`/`apply_robin_order` return `Result` | **0.2.0** breaking |
-| tpt-fem-thermal | `poisson_element_matrix`/`poisson_source_vector` return `Result` | **0.2.0** breaking |
-| tpt-fem-elasticity | `elasticity_body_vector`/`_mass_matrix`/`_lumped_mass` return `Result` | **0.2.0** breaking |
-| tpt-fem-contact | new `ContactError`; augmented-Lagrangian returns `Result`; octree search | **0.2.0** breaking |
-| tpt-fem-coupling | `fsi_interface_loads` path now returns `Result<_, CouplingError>` | **0.2.0** breaking — ⚠ no CHANGELOG entry yet |
-| tpt-fem-io-exodus | `mesh_to_exodus_bytes` returns `Result` | **0.2.0** breaking |
-| tpt-fem-cli | new `topopt` subcommand (enables `tpt-fem/topopt`) | **0.2.0** (follows `tpt-fem`) |
+| Crate | Why | New version |
+|-------|-----|-------------|
+| tpt-fem-quadrature | Keast4 table fix; new `try_gauss_legendre*`, `QuadratureError` (additive) | **0.1.1** |
+| tpt-fem-sparse | new `solve_cg` (additive) | **0.1.1** |
+| tpt-fem-eigen | `lanczos_eigs` → `Result` (breaking) + Lanczos fixes | **0.2.0** |
+| tpt-fem-composite | internal `unwrap` removal only | **0.1.1** |
+| tpt-fem-element | `line/quad/hex_rule` → `Result` (breaking) | **0.2.0** |
+| tpt-fem-mesh | pin `tpt-fem-element` 0.2 (private use only); new `to_msh_string`, `nodal_csv`, `ExportError` (additive) | **0.1.1** |
+| tpt-fem-mesh-gen | internal `unwrap` removal only | **0.1.1** |
+| tpt-fem-io-abaqus | untrusted-input `unwrap` fix | **0.1.1** |
+| tpt-fem-io-exodus | `connect*` suffix now rejected, not defaulted | **0.1.1** |
+| tpt-fem-assembly | `apply_neumann_order`/`apply_robin_order` → `Result` (breaking) | **0.2.0** |
+| tpt-fem-elasticity | mass/body-vector fns → `Result` (breaking) | **0.2.0** |
+| tpt-fem-thermal | `poisson_*` → `Result` (breaking); new transient heat solver | **0.2.0** |
+| tpt-fem-contact | `augmented_lagrangian` → `Result`, new `ContactError` (breaking) | **0.2.0** |
+| tpt-fem-dynamic | `newmark` → `Result` (breaking) | **0.2.0** |
+| tpt-fem-fluid | `stokes_dofmap`, `transient_stokes` → `Result`; new error variants (breaking) | **0.2.0** |
+| tpt-fem-modal | `modal_superposition` → `Result` (breaking) | **0.2.0** |
+| tpt-fem-porous | `PorousError`; `solve_darcy`/`terzaghi_consolidation` signatures (breaking) | **0.2.0** |
+| tpt-fem-topopt | pin bumps only (no public API change) | **0.1.1** |
+| tpt-fem-coupling | `fsi_interface_loads` → `Result` (breaking) | **0.2.0** |
+| tpt-fem | umbrella re-exports all of the above; `Error` gains variants | **0.2.0** |
+| tpt-fem-cli | new `topopt` subcommand, `mesh convert` formats; follows umbrella | **0.2.0** |
+| tpt-fem-amr, -dofmap, -hyperelastic, -io-vtk, -plasticity, -solve | no source change, no breaking dependency in their public API | unchanged (skip) |
 
-Not changed and **not republished**: tpt-fem-sparse, tpt-fem-solve, tpt-fem-amr,
-tpt-fem-composite (no internal deps on a bumped crate, no source changes).
+21 crates are republished (the first plan, which bumped every dependent, was
+23). Migration notes for users: [`docs/MIGRATING-0.2.md`](docs/MIGRATING-0.2.md).
 
 ### 3. Publish order & status
 
-Topological order (checked with `cargo metadata`). Wait for each crate to appear
-in the index (`cargo search <name>` / crates.io page) before publishing its
-dependents; dry-runs of dependents only pass once their deps are live.
+Topological order. Wait for each crate to appear in the index
+(`cargo search <name>` / crates.io page) before publishing its dependents.
 
-| # | Crate | 0.1.0 → | Status | Notes |
-|---|-------|---------|--------|-------|
-| 1 | tpt-fem-quadrature | 0.1.1 | ⬜ | |
-| 2 | tpt-fem-eigen | 0.1.1 | ⬜ | |
-| 3 | tpt-fem-element | 0.2.0 | ⬜ | dep `tpt-fem-quadrature = "0.1.1"` (needs `try_gauss_legendre`) |
-| 4 | tpt-fem-mesh | 0.2.0 | ⬜ | follows element |
-| 5 | tpt-fem-dofmap | 0.2.0 | ⬜ | follows mesh |
-| 6 | tpt-fem-mesh-gen | 0.2.0 | ⬜ | follows mesh |
-| 7 | tpt-fem-io-vtk | 0.2.0 | ⬜ | follows mesh |
-| 8 | tpt-fem-io-abaqus | 0.2.0 | ⬜ | follows mesh |
-| 9 | tpt-fem-io-exodus | 0.2.0 | ⬜ | breaking + follows mesh |
-| 10 | tpt-fem-assembly | 0.2.0 | ⬜ | breaking |
-| 11 | tpt-fem-hyperelastic | 0.2.0 | ⬜ | follows mesh |
-| 12 | tpt-fem-plasticity | 0.2.0 | ⬜ | follows mesh |
-| 13 | tpt-fem-elasticity | 0.2.0 | ⬜ | breaking |
-| 14 | tpt-fem-thermal | 0.2.0 | ⬜ | breaking |
-| 15 | tpt-fem-contact | 0.2.0 | ⬜ | breaking |
-| 16 | tpt-fem-dynamic | 0.2.0 | ⬜ | follows assembly/elasticity |
-| 17 | tpt-fem-fluid | 0.2.0 | ⬜ | follows assembly/dynamic |
-| 18 | tpt-fem-modal | 0.2.0 | ⬜ | follows dynamic |
-| 19 | tpt-fem-porous | 0.2.0 | ⬜ | follows assembly/dynamic |
-| 20 | tpt-fem-topopt | 0.2.0 | ⬜ | follows elasticity |
-| 21 | tpt-fem-coupling | 0.2.0 | ⬜ | breaking |
-| 22 | tpt-fem | 0.2.0 | ⬜ | umbrella; bump pins for every crate above |
-| 23 | tpt-fem-cli | 0.2.0 | ⬜ | last |
-| — | tpt-fem-sparse, -solve, -amr, -composite | 0.1.0 | ➖ unchanged | skip |
-| — | tpt-fem-py | 0.2.0 | 🚫 PyPI | build/upload via maturin after crates.io is done |
-| — | tpt-fem-wasm, tpt-fem-capi | 0.1.0 | 🚫 `publish = false` | not published |
-
-> Before bumping, double-check the "unchanged" four with
-> `git diff 9a5da2f HEAD -- crates/tpt-fem-{sparse,solve,amr,composite}` (the
-> `git diff --stat` currently shows no source changes for them).
+| # | Crate | → | Status |
+|---|-------|---|--------|
+| 1 | tpt-fem-quadrature | 0.1.1 | ⬜ |
+| 2 | tpt-fem-sparse | 0.1.1 | ⬜ |
+| 3 | tpt-fem-eigen | 0.2.0 | ⬜ |
+| 4 | tpt-fem-composite | 0.1.1 | ⬜ |
+| 5 | tpt-fem-element | 0.2.0 | ⬜ |
+| 6 | tpt-fem-mesh | 0.1.1 | ⬜ |
+| 7 | tpt-fem-mesh-gen | 0.1.1 | ⬜ |
+| 8 | tpt-fem-io-abaqus | 0.1.1 | ⬜ |
+| 9 | tpt-fem-io-exodus | 0.1.1 | ⬜ |
+| 10 | tpt-fem-assembly | 0.2.0 | ⬜ |
+| 11 | tpt-fem-elasticity | 0.2.0 | ⬜ |
+| 12 | tpt-fem-thermal | 0.2.0 | ⬜ |
+| 13 | tpt-fem-contact | 0.2.0 | ⬜ |
+| 14 | tpt-fem-dynamic | 0.2.0 | ⬜ |
+| 15 | tpt-fem-fluid | 0.2.0 | ⬜ |
+| 16 | tpt-fem-modal | 0.2.0 | ⬜ |
+| 17 | tpt-fem-porous | 0.2.0 | ⬜ |
+| 18 | tpt-fem-topopt | 0.1.1 | ⬜ |
+| 19 | tpt-fem-coupling | 0.2.0 | ⬜ |
+| 20 | tpt-fem | 0.2.0 | ⬜ |
+| 21 | tpt-fem-cli | 0.2.0 | ⬜ |
+| — | tpt-fem-py | 0.2.0 | 🚫 PyPI (`maturin publish`, after crates.io) |
+| — | tpt-fem-wasm, tpt-fem-capi | 0.1.0 | 🚫 `publish = false` |
 
 ### 4. Pre-flight checklist
 
-- [ ] **Resolve stale CHANGELOG sections.** `contact`, `eigen` and `io-exodus`
-      already had `[Unreleased]` sections in the 0.1.0 commit. Work out which
-      entries actually shipped in 0.1.0 (compare against the crates.io source,
-      e.g. docs.rs "source" view) and which are new; file them under `[0.1.0]` or
-      the new version accordingly.
-- [ ] Add the missing `tpt-fem-coupling` CHANGELOG entry (Result-returning FSI path).
-- [ ] Rename `[Unreleased]` → `[<version>] - <date>` in each republished crate; add
-      a short "dependency bump" line for follow-only crates (mesh, dofmap, io-*,
-      etc.), and cli's `topopt` entry.
-- [ ] Bump `version` in each republished crate's `Cargo.toml`.
+Code work (Phase 16 of `todo.md`) is done; what remains is mechanical:
+
+- [ ] Rename each republished crate's `[Unreleased]` → `[<version>] - <date>`
+      in its `CHANGELOG.md` and add the `[x.y.z]:` link at the bottom.
+- [ ] Bump `version` in each republished crate's `Cargo.toml` per §2.
 - [ ] Bump the matching entries in root `Cargo.toml` `[workspace.dependencies]`
-      (all currently `"0.1.0"`), including `tpt-fem-quadrature = "0.1.1"` /
-      `tpt-fem-eigen = "0.1.1"`.
-- [ ] Bump `tpt-fem` pins in `tpt-fem-py`, `tpt-fem-capi`, `tpt-fem-wasm`
-      (`tpt-fem-topopt` pin in wasm) — these live outside the workspace, so
-      `cargo` won't flag them.
-- [ ] Update version snippets in `README.md` and per-crate READMEs (`grep -rn '0\.1\.0'`).
-- [ ] `cargo update -w` to refresh `Cargo.lock`.
-- [ ] Remove or merge the stale `crates-publish-order.md` (all boxes unchecked,
-      duplicates this file).
+      (quadrature/sparse/mesh... patch pins may stay `"0.1.0"`, which still
+      resolves to the new patch; breaking crates **must** move to `"0.2.0"`,
+      and `tpt-fem-element`'s dependency on quadrature should be `"0.1.1"`
+      because it needs `try_gauss_legendre`).
+- [ ] Update the `tpt-fem*` pins in `tpt-fem-py`, `tpt-fem-capi`, `tpt-fem-wasm`
+      (checked by `just pins` / the CI `pins` job).
+- [ ] Update version snippets in `README.md` and per-crate READMEs
+      (`grep -rn '0\.1\.0'`).
+- [ ] `cargo update -w` and commit the refreshed `Cargo.lock` files.
+- [ ] Delete or fold in the stale `crates-publish-order.md`.
+- [ ] Run `just release-check` (below) and the manual `fuzz` workflow once.
 
-### 5. Verification gates (all green before the first `cargo publish`)
+### 5. Verification gates
 
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo test -p tpt-fem --test manifest_drift   # version pins consistent
-cargo deny check
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo semver-checks check-release              # optional; confirms breaking vs patch
-# non-workspace crates still build against the bumped pins:
-cargo build --manifest-path crates/tpt-fem-capi/Cargo.toml
-cargo build --manifest-path crates/tpt-fem-wasm/Cargo.toml --target wasm32-unknown-unknown
-cargo check --manifest-path crates/tpt-fem-py/Cargo.toml
-```
+`just release-check` runs everything that can run locally: `fmt`, `clippy
+-D warnings`, `cargo deny`, `cargo test`, the pin check, an MSRV (1.85) build,
+`cargo package --list` for every publishable crate, rustdoc with warnings
+denied, the manifest-drift test, and builds of capi / py / wasm. CI runs the same
+set plus `cargo semver-checks` (advisory), `cargo machete`, and (on PRs) the
+CHANGELOG guard.
 
-Per crate, before publishing: `cargo package -p <crate> --list` (nothing stray —
-no logs/`.vtk` files) and `cargo publish -p <crate> --dry-run` (dependents can only
-dry-run after their deps are live).
+Per crate, just before publishing: `cargo publish -p <crate> --dry-run`
+(dependents only dry-run once their dependencies are live on crates.io).
 
 ### 6. Publish
 
 ```sh
-cargo publish -p tpt-fem-quadrature     # then follow table order in §3
+cargo publish -p tpt-fem-quadrature     # then follow the table in §3
 ```
 
-- Updates to **existing** crates aren't subject to the new-crate rate limit, so no
-  cooldown waits are expected (the 0.1.0 pass hit them only for brand-new crates).
-- If a crate fails (e.g. metadata validation like the keyword-length rejection in
-  0.1.0), fix, commit, bump nothing already published, and resume from that row.
-- Mark each row ✅ as it lands. A published version can't be overwritten — fix
-  forward with a patch bump (`cargo yank` only if truly broken).
+- Updates to **existing** crates are not subject to the new-crate rate limit, so
+  no cooldown waits are expected.
+- If a crate fails (e.g. metadata validation like the 0.1.0 keyword-length
+  rejection), fix, commit, and resume from that row; mark each row ✅ as it lands.
+- A published version can't be overwritten — fix forward with a patch bump
+  (`cargo yank` only if truly broken).
 
 ### 7. Post-release
 
-- [ ] `git tag v0.2.0` (+ per-crate tags for the 0.1.1 patches if wanted) and push;
-      create a GitHub release from the CHANGELOGs.
+- [ ] `git tag v0.2.0` (+ per-crate tags if wanted), push, and create a GitHub
+      release from the CHANGELOGs (link `docs/MIGRATING-0.2.md`).
 - [ ] Add fresh empty `[Unreleased]` sections to each CHANGELOG.
-- [ ] Build and upload `tpt-fem-py` to PyPI (maturin) at 0.2.0.
-- [ ] Confirm docs.rs builds succeeded for all 23 crates.
-- [ ] Add a short note to the 0.1.x users: the `Result`-returning API migration
-      (quadrature order outside `1..=5` no longer panics).
+- [ ] `maturin publish` `tpt-fem-py` to PyPI (workflow_dispatch `publish` job).
+- [ ] Tag `capi-v0.2.0` to produce the prebuilt C libraries.
+- [ ] Confirm docs.rs builds for all 21 republished crates.
 
-### Open questions
+### Open items deliberately left for a later release
 
-1. Should `tpt-fem-capi` go on crates.io (it's useful mainly as a C library, so
-   GitHub releases with prebuilt `.dll`/`.so`/header may fit better)?
-2. Is the `tpt-fem-coupling` change intended as breaking? (Assumed yes.)
-3. Lockstep 0.2.0 vs. leaving follow-only crates (dofmap, io-vtk, mesh-gen…) to
-   the minimum — lockstep is assumed here; it's simpler and avoids duplicate
-   `tpt-fem-mesh` versions in the graph.
+- CLI / Python exposure of `dynamic`, `plasticity`, `hyperelastic`, `fluid`,
+  `porous`, `contact`, `coupling`, `composite` (library-only today).
+- GPU/SIMD assembly; additional export formats beyond CSV/Gmsh (STL, XDMF).
+- A native sparse *direct* solver (the new `solve_cg` covers SPD systems only).
 
 ---
 

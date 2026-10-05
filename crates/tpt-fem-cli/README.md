@@ -18,7 +18,7 @@ Subcommands:
 - `topopt` — SIMP minimum-compliance topology optimization of a 2-D
   cantilever, exported as a nodal density field.
 - `mesh info` — print summary statistics about a mesh file.
-- `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
+- `mesh convert` — convert between mesh formats (output chosen by extension: `.vtk`, `.msh`, `.inp`, `.ex2`, `.csv`).
 
 Error messages reuse the `Display` impls from the core crates, so malformed
 input reports a human-readable cause rather than a panic.
@@ -60,7 +60,7 @@ tpt-fem mesh convert mesh.msh mesh.vtk
 | `amr` | Adaptive h-refinement Poisson solve (`--max-elements`, `--theta`, `--constant`, `-o/--output`). |
 | `topopt` | SIMP topology optimization of a 2-D cantilever (`--nx`, `--ny`, `--vol-frac`, `--penal`, `--filter-radius`, `--max-iter`, `-o/--output`). |
 | `mesh info` | Mesh summary statistics. |
-| `mesh convert` | Gmsh `.msh` → ParaView `.vtk` conversion. |
+| `mesh convert` | Mesh format conversion (`.msh`/`.inp`/`.ex2`/`.vtk` in; `.vtk`/`.msh`/`.inp`/`.ex2`/`.csv` out). |
 
 ## Position in the crate stack
 
