@@ -54,7 +54,10 @@ let x = tpt_fem_sparse::solve(&c, &[3.0, 5.0]).unwrap();
 | `Coo` | Growable coordinate-list accumulator with duplicate summing. |
 | `Coo::push` / `Coo::to_csr` | Add entries and collapse to CSR. |
 | `Csr` | Compressed-sparse-row matrix (`row_ptrs`, `col_idxs`, `values`). |
-| `solve` / `solve_multi` | Dense LU factorisation and solve via `tpt-math-linalg-dense` (single/multiple RHS). |
+| `solve` / `solve_multi` | Single/multiple RHS. Symmetric positive-definite systems with ≥ 200 unknowns are routed to the sparse envelope Cholesky automatically; large unsymmetric/indefinite systems with a narrow reordered band use the banded LU; everything else uses the dense LU from `tpt-math-linalg-dense`. |
+| `solve_banded` | Pure-Rust sparse direct solver for general systems (RCM + banded LU with partial pivoting); used automatically for large unsymmetric/indefinite systems with a narrow band. |
+| `solve_skyline` | Pure-Rust sparse direct solver for SPD systems (reverse Cuthill-McKee + envelope Cholesky). |
+| `solve_cg` | Jacobi-preconditioned conjugate gradients for SPD systems (`O(nnz)` memory). |
 | `SparseError` | Error type for singular / non-finite systems. |
 
 ## Position in the crate stack
