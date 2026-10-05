@@ -6,6 +6,9 @@
 //! * `amr` — adaptive h-refinement Poisson solve on the unit square
 //!   (`tpt-fem-amr::solve_adaptive`): quadtree refinement driven by a
 //!   Zienkiewicz–Zhu error estimator with Dörfler marking.
+//! * `topopt` — SIMP minimum-compliance topology optimization of a 2-D
+//!   cantilever (`tpt-fem-topopt::topopt_simp`), exported as a nodal density
+//!   field.
 //! * `mesh info` — print summary statistics about a mesh file.
 //! * `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
 //!
@@ -18,9 +21,9 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use tpt_fem::{
-    boundary_faces, box_mesh, read_exodus, read_inp, read_vtk, solve_adaptive, solve_elasticity,
-    solve_modal, solve_poisson, write_vtk, write_vtk_with_data, AmrOptions, CellType, ElasticModel,
-    Error, Mesh, MeshBuilder, PointData,
+    boundary_faces, box_mesh, cantilever_load, read_exodus, read_inp, read_vtk, solve_adaptive,
+    solve_elasticity, solve_modal, solve_poisson, topopt_simp, write_vtk, write_vtk_with_data,
+    AmrOptions, CellType, ElasticModel, Error, Grid, Mesh, MeshBuilder, PointData, TopOptParams,
 };
 
 type Err = Error;
@@ -67,6 +70,32 @@ enum Command {
         constant: f64,
         /// Path of the exported ParaView `.vtk` result.
         #[arg(short, long, default_value = "amr.vtk")]
+        output: PathBuf,
+    },
+    /// SIMP topology optimization of a 2-D cantilever: clamped left edge,
+    /// downward point load at the bottom-right corner, minimum compliance at a
+    /// fixed volume fraction.
+    Topopt {
+        /// Number of elements along `x`.
+        #[arg(long, default_value_t = 60)]
+        nx: usize,
+        /// Number of elements along `y`.
+        #[arg(long, default_value_t = 20)]
+        ny: usize,
+        /// Target solid volume fraction in `(0, 1]`.
+        #[arg(long, default_value_t = 0.5)]
+        vol_frac: f64,
+        /// SIMP penalty exponent (>= 1; typically 3).
+        #[arg(long, default_value_t = 3.0)]
+        penal: f64,
+        /// Sensitivity-filter radius in element widths.
+        #[arg(long, default_value_t = 1.5)]
+        filter_radius: f64,
+        /// Maximum number of optimality-criteria iterations.
+        #[arg(long, default_value_t = 50)]
+        max_iter: usize,
+        /// Path of the exported ParaView `.vtk` result (nodal density `rho`).
+        #[arg(short, long, default_value = "topopt.vtk")]
         output: PathBuf,
     },
     /// Generate a starter `problem.toml` for a chosen problem type.
@@ -285,6 +314,15 @@ fn run() -> Result<(), Err> {
             constant,
             output,
         } => run_amr(max_elements, theta, constant, &output),
+        Command::Topopt {
+            nx,
+            ny,
+            vol_frac,
+            penal,
+            filter_radius,
+            max_iter,
+            output,
+        } => run_topopt(nx, ny, vol_frac, penal, filter_radius, max_iter, &output),
         Command::Init { problem, output } => init_config(&problem, &output),
         Command::Mesh { action } => match action {
             MeshAction::Info { file } => mesh_info(&file),
@@ -698,6 +736,91 @@ fn run_amr(max_elements: usize, theta: f64, constant: f64, output: &PathBuf) -> 
     Ok(())
 }
 
+/// SIMP topology-optimization driver (`topopt` subcommand).
+///
+/// Optimizes a unit-element cantilever on an `nx × ny` element grid, then
+/// exports the mesh with the element densities averaged onto the nodes (the
+/// VTK writer only carries point data).
+fn run_topopt(
+    nx: usize,
+    ny: usize,
+    vol_frac: f64,
+    penal: f64,
+    filter_radius: f64,
+    max_iter: usize,
+    output: &PathBuf,
+) -> Result<(), Err> {
+    if nx < 1 || ny < 1 {
+        return Err(Error::Msg(format!(
+            "--nx and --ny must be >= 1, got {nx} x {ny}"
+        )));
+    }
+    if !(vol_frac > 0.0 && vol_frac <= 1.0) {
+        return Err(Error::Msg(format!(
+            "--vol-frac must be in (0, 1], got {vol_frac}"
+        )));
+    }
+    if penal < 1.0 {
+        return Err(Error::Msg(format!("--penal must be >= 1, got {penal}")));
+    }
+    if filter_radius < 0.0 {
+        return Err(Error::Msg(format!(
+            "--filter-radius must be >= 0, got {filter_radius}"
+        )));
+    }
+    let grid = Grid::new(nx + 1, ny + 1, 1.0);
+    let (f, bcs) = cantilever_load(&grid, 1.0);
+    let params = TopOptParams {
+        grid: grid.clone(),
+        e0: 1.0,
+        nu: 0.3,
+        vol_frac,
+        penal,
+        filter_radius,
+        max_iter,
+        move_limit: 0.2,
+    };
+    let t0 = Instant::now();
+    let res = topopt_simp(&params, &f, &bcs).map_err(|e| Error::Msg(e.to_string()))?;
+    let elapsed = t0.elapsed();
+
+    // Average element densities onto the nodes.
+    let mut sum = vec![0.0; grid.n_nodes()];
+    let mut cnt = vec![0.0; grid.n_nodes()];
+    for (e, conn) in grid.elems.iter().enumerate() {
+        for &n in conn {
+            sum[n] += res.densities[e];
+            cnt[n] += 1.0;
+        }
+    }
+    let nodal: Vec<f64> = sum.iter().zip(&cnt).map(|(s, c)| s / c).collect();
+
+    let mut b = MeshBuilder::new();
+    for c in &grid.coords {
+        b.add_node(vec![c[0], c[1]]);
+    }
+    for e in &grid.elems {
+        b.add_element(CellType::Quad, e.to_vec());
+    }
+    let mesh = b.build();
+
+    println!("Elements:            {}", grid.n_elem());
+    println!("Iterations:          {}", res.iterations);
+    println!("Solve time:          {:.3?}", elapsed);
+    println!("Initial compliance:  {:.6e}", res.compliance[0]);
+    println!(
+        "Final compliance:    {:.6e}",
+        res.compliance[res.compliance.len() - 1]
+    );
+    println!(
+        "Volume fraction:     {:.4}",
+        res.densities.iter().sum::<f64>() / grid.n_elem() as f64
+    );
+    write_vtk_with_data(&mesh, &[PointData::new("rho", nodal)], output)?;
+    println!("Wrote {}", output.display());
+    Ok(())
+}
+
 /// Reference (spatial) dimension of a cell type.
 fn cell_dim(cell: CellType) -> usize {
     match cell {
@@ -1062,6 +1185,24 @@ $EndElements
         let out = std::env::temp_dir().join("tpt_fem_cli_amr_bad_theta.vtk");
         assert!(run_amr(64, 0.0, 1.0, &out).is_err());
         assert!(run_amr(64, 1.5, 1.0, &out).is_err());
+    }
+
+    #[test]
+    fn topopt_runs_and_writes_vtk() {
+        let out = std::env::temp_dir().join("tpt_fem_cli_topopt_test.vtk");
+        run_topopt(12, 6, 0.5, 3.0, 1.5, 5, &out).expect("topopt run");
+        let meta = std::fs::metadata(&out).expect("output written");
+        assert!(meta.len() > 0, "VTK output should be non-empty");
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn topopt_rejects_invalid_params() {
+        let out = std::env::temp_dir().join("tpt_fem_cli_topopt_bad.vtk");
+        assert!(run_topopt(12, 6, 0.0, 3.0, 1.5, 5, &out).is_err());
+        assert!(run_topopt(12, 6, 1.5, 3.0, 1.5, 5, &out).is_err());
+        assert!(run_topopt(12, 6, 0.5, 0.5, 1.5, 5, &out).is_err());
+        assert!(run_topopt(0, 6, 0.5, 3.0, 1.5, 5, &out).is_err());
     }
 
     #[test]

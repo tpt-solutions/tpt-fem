@@ -1039,7 +1039,9 @@ been implemented yet — tracked for a future pass.*
        Csr::matvec and tpt-fem-dynamic newmark/central_difference now hoist the
        Coo-to-CSR conversion out of the step loop (also fixing the coo_matvec
        smell). GPU offload remains out of scope.
-- [ ] WASM in-browser interactive solve+visualize demo —
+- [x] **Done (2026-10-05): `crates/tpt-fem-wasm` (wasm-bindgen wrapper + static
+       `www/` page for the SIMP cantilever; grid capped at 40x16 because the dense LU
+       runs on the main thread).** WASM in-browser interactive solve+visualize demo —
        `tpt-fem-quadrature`/`tpt-fem-element`/`tpt-fem-mesh` already build for
        `wasm32-unknown-unknown` per CI. **Still open** (needs a JS/UI host;
        no browser toolchain exercised in this repo CI).
@@ -1138,7 +1140,9 @@ pass. Everything else below is tracked for a future pass, not implemented.*
       `tpt-fem-thermal::solve_poisson` (`ambiguous_glob_reexports`, hard
       error for downstream glob importers) — hence the explicit item list at
       the crate root with the unfiltered namespace kept under `tpt_fem::amr`.
-- [ ] No CLI or Python-binding exposure exists for any Phase 12+ crate
+- [ ] **Partly addressed (2026-10-05):** `modal` was already exposed and `topopt` now
+      has a `tpt-fem topopt` subcommand and `tpt_fem.topopt_cantilever`; the rest
+      remain. Original note: No CLI or Python-binding exposure exists for any Phase 12+ crate
       (`dofmap`, `dynamic`, `plasticity`, `hyperelastic`, `composite`,
       `porous`, `contact`, `fluid`, `coupling`, `modal`, `topopt`, `amr`) —
       12 of 28 workspace crates are reachable only by writing Rust directly

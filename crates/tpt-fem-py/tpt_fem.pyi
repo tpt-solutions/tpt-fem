@@ -16,9 +16,11 @@ __all__ = [
     "ElasticitySolution",
     "ModalSolution",
     "ModeShape",
+    "TopOptSolution",
     "solve_poisson",
     "solve_elasticity",
     "solve_modal",
+    "topopt_cantilever",
 ]
 
 Vector3 = Sequence[float]
@@ -195,3 +197,42 @@ def solve_modal(
     bcs: Sequence[tuple[int, int, float]],
 ) -> ModalSolution:
     """Solve the natural-vibration eigenproblem ``K φ = ω² M φ`` on ``mesh``."""
+
+
+class TopOptSolution:
+    """Result of :func:`topopt_cantilever`: optimized element densities."""
+
+    @property
+    def nx(self) -> int:
+        """Number of elements along ``x``."""
+
+    @property
+    def ny(self) -> int:
+        """Number of elements along ``y``."""
+
+    @property
+    def densities(self) -> list[float]:
+        """Final element densities, row-major (``ny`` rows of ``nx`` columns)."""
+
+    @property
+    def compliance(self) -> list[float]:
+        """Compliance at each iteration (index 0 is the uniform start)."""
+
+    @property
+    def iterations(self) -> int:
+        """Number of optimality-criteria iterations performed."""
+
+    def to_numpy(self) -> Any:
+        """Densities as a ``(ny, nx)`` ``numpy.ndarray``."""
+
+
+def topopt_cantilever(
+    nx: int,
+    ny: int,
+    vol_frac: float,
+    penal: float = 3.0,
+    filter_radius: float = 1.5,
+    max_iter: int = 50,
+) -> TopOptSolution:
+    """SIMP minimum-compliance optimization of a 2-D cantilever (clamped left
+    edge, unit downward load at the bottom-right corner)."""

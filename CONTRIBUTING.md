@@ -4,6 +4,11 @@ Thanks for your interest in improving the tpt-fem workspace. This document
 covers how to report issues and what we expect from a good bug report or
 feature request.
 
+**Contributions are issues only.** We do not accept pull requests; any
+unsolicited pull requests will be closed without review. If you have found a
+bug or want a feature, please open an issue and the maintainers will take it
+from there.
+
 ## Reporting issues
 
 Before opening a new issue, please search the existing issues to avoid
@@ -48,5 +53,5 @@ your issue touches the crate structure, mention which crates are involved.
 
 ## License
 
-Contributions are accepted under the same dual `MIT OR Apache-2.0` license as
-the project.
+Any material you submit in an issue (reports, snippets, examples) may be used
+under the same dual `MIT OR Apache-2.0` license as the project.

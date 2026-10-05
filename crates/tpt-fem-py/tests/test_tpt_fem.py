@@ -3,6 +3,8 @@
 Run with `maturin develop` then `pytest`, or `maturin pytest`.
 """
 
+import pytest
+
 import tpt_fem as fem
 
 
@@ -144,3 +146,19 @@ def test_to_pyvista_round_trips():
     assert "u" in grid.point_data
 
 
+
+
+def test_topopt_cantilever():
+    sol = fem.topopt_cantilever(12, 6, 0.5, max_iter=5)
+    assert sol.nx == 12 and sol.ny == 6
+    assert len(sol.densities) == 12 * 6
+    assert len(sol.compliance) == sol.iterations + 1
+    assert sol.compliance[-1] < sol.compliance[0]
+    assert abs(sum(sol.densities) / len(sol.densities) - 0.5) < 1e-3
+
+
+def test_topopt_cantilever_rejects_bad_params():
+    with pytest.raises(RuntimeError):
+        fem.topopt_cantilever(12, 6, 0.0)
+    with pytest.raises(RuntimeError):
+        fem.topopt_cantilever(0, 6, 0.5)

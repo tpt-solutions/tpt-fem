@@ -9,6 +9,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `topopt_cantilever` + `TopOptSolution`: SIMP topology optimization of a 2-D
+  cantilever with `to_numpy()` density grid and compliance history.
 - `Mesh` Python class: `load`, `box_mesh`, `coords`, `nodes_on_plane`,
   `nodes_in_box`, `write_vtk`.
 - `solve_poisson` accepting a constant source or a Python callable `f(x, y, z)`.

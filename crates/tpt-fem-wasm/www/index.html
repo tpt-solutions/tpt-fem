@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tpt-fem topology optimization</title>
+<style>
+  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --card:#fff; --line:#ddd; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --fg:#eaeaea; --muted:#999; --card:#1d2026; --line:#333; --accent:#60a5fa; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:1.4rem; margin:0 0 4px; }
+  p { color:var(--muted); margin:0 0 16px; }
+  form { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+  label { display:flex; flex-direction:column; font-size:.85rem; color:var(--muted); }
+  input { font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  button { font:inherit; padding:8px 16px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; align-self:end; }
+  button:disabled { opacity:.5; cursor:wait; }
+  canvas { width:100%; display:block; background:var(--card); border:1px solid var(--line); border-radius:6px; margin-bottom:12px; }
+  #design { image-rendering:pixelated; }
+  #status { font-size:.9rem; color:var(--muted); min-height:1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Topology optimization in your browser</h1>
+  <p>SIMP minimum-compliance design of a cantilever (left edge clamped, load at the bottom-right corner), solved by tpt-fem compiled to WebAssembly.</p>
+  <form id="f">
+    <label>Elements x <input name="nx" type="number" value="30" min="4" max="40"></label>
+    <label>Elements y <input name="ny" type="number" value="10" min="4" max="16"></label>
+    <label>Volume fraction <input name="vf" type="number" value="0.5" min="0.1" max="1" step="0.05"></label>
+    <label>Penalty <input name="p" type="number" value="3" min="1" max="5" step="0.5"></label>
+    <label>Filter radius <input name="r" type="number" value="1.5" min="0" max="5" step="0.25"></label>
+    <label>Iterations <input name="it" type="number" value="20" min="1" max="100"></label>
+    <button id="run" type="submit">Optimize</button>
+  </form>
+  <canvas id="design" aria-label="Optimized material layout"></canvas>
+  <canvas id="hist" height="140" aria-label="Compliance per iteration"></canvas>
+  <div id="status">Loading solver…</div>
+</main>
+<script type="module">
+import init, { optimize_cantilever } from "./pkg/tpt_fem_wasm.js";
+
+const $ = (id) => document.getElementById(id);
+const status = $("status"), run = $("run");
+
+function drawDesign(r) {
+  const c = $("design"), ctx = c.getContext("2d");
+  c.width = r.nx; c.height = r.ny;
+  const d = r.densities, img = ctx.createImageData(r.nx, r.ny);
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  for (let j = 0; j < r.ny; j++) for (let i = 0; i < r.nx; i++) {
+    const rho = d[j * r.nx + i];
+    // Row 0 is y = 0 (bottom); flip so the canvas shows y up.
+    const o = ((r.ny - 1 - j) * r.nx + i) * 4;
+    const v = dark ? Math.round(255 * rho) : Math.round(255 * (1 - rho));
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = v; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function drawHistory(hist) {
+  const c = $("hist"), ctx = c.getContext("2d");
+  const w = c.clientWidth, h = 140, pad = 8;
+  c.width = w * devicePixelRatio; c.height = h * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  const lo = Math.min(...hist), hi = Math.max(...hist);
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent");
+  ctx.lineWidth = 2; ctx.beginPath();
+  hist.forEach((v, k) => {
+    const x = pad + (w - 2 * pad) * k / Math.max(1, hist.length - 1);
+    const y = pad + (h - 2 * pad) * (1 - (v - lo) / Math.max(1e-30, hi - lo));
+    k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
+await init();
+status.textContent = "Ready.";
+
+$("f").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target), num = (k) => Number(f.get(k));
+  run.disabled = true; status.textContent = "Optimizing…";
+  // Yield so the status text paints before the (blocking) solve starts.
+  setTimeout(() => {
+    try {
+      const t0 = performance.now();
+      const r = optimize_cantilever(num("nx"), num("ny"), num("vf"), num("p"), num("r"), num("it"));
+      const hist = Array.from(r.compliance);
+      drawDesign({ nx: r.nx, ny: r.ny, densities: r.densities });
+      drawHistory(hist);
+      status.textContent = `Done in ${((performance.now() - t0) / 1000).toFixed(2)} s: compliance ${hist[0].toExponential(3)} → ${hist[hist.length - 1].toExponential(3)}.`;
+    } catch (err) {
+      status.textContent = `Error: ${err.message ?? err}`;
+    } finally { run.disabled = false; }
+  }, 30);
+});
+</script>
+</body>
+</html>

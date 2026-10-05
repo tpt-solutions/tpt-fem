@@ -3,7 +3,8 @@
 //! Exposes a `Mesh` class (`load` / `box_mesh` / `coords` / `nodes_on_plane` /
 //! `nodes_in_box` / `write_vtk`) and solver functions: `solve_poisson`
 //! (steady heat conduction), `solve_elasticity` (linear statics), and
-//! `solve_modal` (natural-vibration eigenproblem `K φ = ω² M φ`). The Poisson
+//! `solve_modal` (natural-vibration eigenproblem `K φ = ω² M φ`), and
+//! `topopt_cantilever` (SIMP topology optimization). The Poisson
 //! source may be a constant `float` or a Python callable `f(x, y, z)`; errors
 //! from the core crates are surfaced as Python exceptions via their `Display`
 //! impls.
@@ -22,9 +23,9 @@
 #![allow(deprecated)]
 
 use ::tpt_fem::{
-    box_mesh as rs_box_mesh, solve_elasticity as rs_solve_elasticity,
-    solve_modal as rs_solve_modal, solve_poisson as rs_solve_poisson, write_vtk_with_data,
-    CellType, ElasticModel, Mesh as RsMesh, PointData,
+    box_mesh as rs_box_mesh, cantilever_load, solve_elasticity as rs_solve_elasticity,
+    solve_modal as rs_solve_modal, solve_poisson as rs_solve_poisson, topopt_simp,
+    write_vtk_with_data, CellType, ElasticModel, Grid, Mesh as RsMesh, PointData, TopOptParams,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -300,6 +301,126 @@ fn solve_modal(
         omega2s,
         shapes,
     })
+}
+
+/// SIMP minimum-compliance topology optimization of a 2-D cantilever.
+///
+/// The design lives on an `nx × ny` grid of unit square elements: the left
+/// edge is clamped and a unit downward point load acts at the bottom-right
+/// corner. Returns a [`TopOptSolution`] with the final element densities and
+/// the compliance history.
+#[pyfunction]
+#[pyo3(signature = (nx, ny, vol_frac, penal=3.0, filter_radius=1.5, max_iter=50))]
+fn topopt_cantilever(
+    py: Python<'_>,
+    nx: usize,
+    ny: usize,
+    vol_frac: f64,
+    penal: f64,
+    filter_radius: f64,
+    max_iter: usize,
+) -> PyResult<TopOptSolution> {
+    if nx < 1 || ny < 1 {
+        return Err(PyRuntimeError::new_err(format!(
+            "nx and ny must be >= 1, got {nx} x {ny}"
+        )));
+    }
+    if !(vol_frac > 0.0 && vol_frac <= 1.0) {
+        return Err(PyRuntimeError::new_err(format!(
+            "vol_frac must be in (0, 1], got {vol_frac}"
+        )));
+    }
+    if penal < 1.0 {
+        return Err(PyRuntimeError::new_err(format!(
+            "penal must be >= 1, got {penal}"
+        )));
+    }
+    if filter_radius < 0.0 {
+        return Err(PyRuntimeError::new_err(format!(
+            "filter_radius must be >= 0, got {filter_radius}"
+        )));
+    }
+    let res = py.allow_threads(move || {
+        let grid = Grid::new(nx + 1, ny + 1, 1.0);
+        let (f, bcs) = cantilever_load(&grid, 1.0);
+        let params = TopOptParams {
+            grid,
+            e0: 1.0,
+            nu: 0.3,
+            vol_frac,
+            penal,
+            filter_radius,
+            max_iter,
+            move_limit: 0.2,
+        };
+        topopt_simp(&params, &f, &bcs).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })?;
+    Ok(TopOptSolution {
+        nx,
+        ny,
+        densities: res.densities,
+        compliance: res.compliance,
+        iterations: res.iterations,
+    })
+}
+
+/// Result of [`topopt_cantilever`]: optimized element densities + history.
+#[pyclass]
+struct TopOptSolution {
+    nx: usize,
+    ny: usize,
+    densities: Vec<f64>,
+    compliance: Vec<f64>,
+    iterations: usize,
+}
+
+#[pymethods]
+impl TopOptSolution {
+    /// Number of elements along `x`.
+    #[getter]
+    fn nx(&self) -> usize {
+        self.nx
+    }
+
+    /// Number of elements along `y`.
+    #[getter]
+    fn ny(&self) -> usize {
+        self.ny
+    }
+
+    /// Final element densities, row-major (`y` rows of `x` columns).
+    #[getter]
+    fn densities(&self) -> Vec<f64> {
+        self.densities.clone()
+    }
+
+    /// Compliance at each iteration (index 0 is the uniform start).
+    #[getter]
+    fn compliance(&self) -> Vec<f64> {
+        self.compliance.clone()
+    }
+
+    /// Number of optimality-criteria iterations performed.
+    #[getter]
+    fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Densities as a `(ny, nx)` `numpy.ndarray`.
+    fn to_numpy(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_numpy_array(py, &self.densities, &[self.ny, self.nx])
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TopOptSolution({}x{} elements, iterations={}, compliance {:.4e} -> {:.4e})",
+            self.nx,
+            self.ny,
+            self.iterations,
+            self.compliance.first().copied().unwrap_or(0.0),
+            self.compliance.last().copied().unwrap_or(0.0)
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -747,8 +868,10 @@ fn tpt_fem(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ElasticitySolution>()?;
     m.add_class::<ModalSolution>()?;
     m.add_class::<ModeShape>()?;
+    m.add_class::<TopOptSolution>()?;
     m.add_function(wrap_pyfunction!(solve_poisson, py)?)?;
     m.add_function(wrap_pyfunction!(solve_elasticity, py)?)?;
     m.add_function(wrap_pyfunction!(solve_modal, py)?)?;
+    m.add_function(wrap_pyfunction!(topopt_cantilever, py)?)?;
     Ok(())
 }

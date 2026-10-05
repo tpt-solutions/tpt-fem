@@ -9,6 +9,8 @@ and this crate adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- `topopt` subcommand: SIMP topology optimization of a 2-D cantilever
+  (`topopt_simp`), exporting the nodal density field `rho` as `.vtk`.
 - `elasticity` subcommand: TOML-configured linear-elasticity statics
   (`solve_elasticity`), with `problem.model` selecting bar / plane-stress /
   plane-strain / 3-D and per-node displacement output.

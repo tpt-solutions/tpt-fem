@@ -15,6 +15,8 @@ Subcommands:
 - `modal` — extract natural vibration modes from a TOML config.
 - `amr` — adaptive h-refinement Poisson solve on the unit square (quadtree,
   ZZ error estimator, Dörfler marking).
+- `topopt` — SIMP minimum-compliance topology optimization of a 2-D
+  cantilever, exported as a nodal density field.
 - `mesh info` — print summary statistics about a mesh file.
 - `mesh convert` — convert a Gmsh `.msh` mesh to a ParaView `.vtk` file.
 
@@ -56,6 +58,7 @@ tpt-fem mesh convert mesh.msh mesh.vtk
 | `elasticity` | TOML-configured linear-elasticity statics run. |
 | `modal` | TOML-configured natural-vibration mode extraction. |
 | `amr` | Adaptive h-refinement Poisson solve (`--max-elements`, `--theta`, `--constant`, `-o/--output`). |
+| `topopt` | SIMP topology optimization of a 2-D cantilever (`--nx`, `--ny`, `--vol-frac`, `--penal`, `--filter-radius`, `--max-iter`, `-o/--output`). |
 | `mesh info` | Mesh summary statistics. |
 | `mesh convert` | Gmsh `.msh` → ParaView `.vtk` conversion. |
 
