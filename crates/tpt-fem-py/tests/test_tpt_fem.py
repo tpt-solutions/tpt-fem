@@ -162,3 +162,172 @@ def test_topopt_cantilever_rejects_bad_params():
         fem.topopt_cantilever(12, 6, 0.0)
     with pytest.raises(RuntimeError):
         fem.topopt_cantilever(0, 6, 0.5)
+
+
+def test_transient_heat_cools_toward_boundary_value():
+    mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [3, 3, 3])
+    bcs = [
+        (nid, 0.0)
+        for axis in range(3)
+        for coord in (0.0, 1.0)
+        for nid in mesh.nodes_on_plane(axis, coord, 1e-9)
+    ]
+    hist = fem.solve_transient_heat(mesh, 1.0, 1.0, 0.01, 20, 1.0, bcs)
+    assert len(hist) == 21
+    assert hist.times[0] == 0.0 and abs(hist.times[-1] - 0.2) < 1e-12
+    interior = [i for i in range(mesh.node_count()) if i not in {b[0] for b in bcs}]
+    first, last = hist[0].values, hist[-1].values
+    assert all(last[i] < first[i] for i in interior)
+    with pytest.raises(RuntimeError):
+        fem.solve_transient_heat(mesh, 1.0, 1.0, 0.0, 5, 1.0, bcs)
+
+
+def test_j2_uniaxial_response_yields_and_hardens():
+    e, sy, h = 200e9, 250e6, 20e9
+    eps_y = sy / e
+    strains = [0.5 * eps_y, eps_y, 2 * eps_y, 4 * eps_y]
+    elastic = fem.j2_uniaxial_response(e, 0.3, sy, strains)
+    assert abs(elastic[0] - 0.5 * sy) < 1.0
+    # Perfect plasticity: stress is capped at the yield stress.
+    assert abs(elastic[2] - sy) < 1e3 and abs(elastic[3] - sy) < 1e3
+    hard = fem.j2_uniaxial_response(e, 0.3, sy, strains, iso_hardening=h)
+    assert hard[3] > hard[2] > sy
+    with pytest.raises(RuntimeError):
+        fem.j2_uniaxial_response(-1.0, 0.3, sy, strains)
+
+
+def test_neo_hookean_uniaxial():
+    out = fem.neo_hookean_uniaxial(2.0, [1.0, 2.0])
+    assert out[0] == 0.0
+    assert abs(out[1] - 2.0 * (2.0 - 0.25)) < 1e-12
+    with pytest.raises(RuntimeError):
+        fem.neo_hookean_uniaxial(2.0, [0.0])
+
+
+def test_solve_darcy_linear_pressure_drop():
+    mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [4, 2, 2])
+    left = mesh.nodes_on_plane(0, 0.0, 1e-9)
+    right = mesh.nodes_on_plane(0, 1.0, 1e-9)
+    bcs = [(n, 1.0) for n in left] + [(n, 0.0) for n in right]
+    p = fem.solve_darcy(mesh, 2.0, bcs)
+    for i in range(mesh.node_count()):
+        x = mesh.coords(i)[0]
+        assert abs(p.values[i] - (1.0 - x)) < 1e-9
+
+
+def test_solve_stokes_poiseuille_profile():
+    # Channel on the unit square driven in x; no-slip walls at y = 0, 1.
+    mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [4, 4, 4])
+    # 3-D duct: no-slip on the y/z walls, driven along x.
+    walls = [n for ax in (1, 2) for c in (0.0, 1.0) for n in mesh.nodes_on_plane(ax, c, 1e-9)]
+    bcs = [(n, k, 0.0) for n in set(walls) for k in range(3)]
+    vel, pres = fem.solve_stokes(mesh, 1.0, [1.0, 0.0, 0.0], bcs)
+    assert len(vel.values) == 3 * mesh.node_count()
+    assert len(pres.values) == len(pres)
+    assert max(vel.values) > 0.0
+    with pytest.raises(RuntimeError):
+        fem.solve_stokes(mesh, 1.0, [1.0, 0.0], bcs)
+
+
+def test_laminate_abd_symmetric_has_zero_coupling():
+    ply = (140e9, 10e9, 0.3, 5e9, 0.125e-3)
+    stack = [ply + (0.0,), ply + (90.0,), ply + (90.0,), ply + (0.0,)]
+    abd = fem.laminate_abd(stack)
+    assert len(abd) == 6 and all(len(r) == 6 for r in abd)
+    for i in range(3):
+        for j in range(3):
+            assert abs(abd[i][3 + j]) < 1e-6 * abs(abd[i][j] or 1.0)
+    assert abd[0][0] > 0 and abd[3][3] > 0
+    with pytest.raises(RuntimeError):
+        fem.laminate_abd([])
+
+
+def test_newmark_sdof_matches_closed_form():
+    import math
+    hist = fem.newmark([[1.0]], [[0.0]], [[4.0]], [1.0], [0.0], [0.0], 0.01, 200)
+    t, u = hist[-1]
+    assert abs(u[0] - math.cos(2.0 * t)) < 1e-3
+    # Callable load + validation.
+    hist = fem.newmark([[1.0]], [[0.1]], [[4.0]], [0.0], [0.0], lambda t: [1.0], 0.01, 10)
+    assert len(hist) == 11
+    with pytest.raises(RuntimeError):
+        fem.newmark([[0.0]], [[0.0]], [[1.0]], [1.0], [0.0], [0.0], 0.01, 5)
+    with pytest.raises(RuntimeError):
+        fem.newmark([[1.0, 0.0]], [[0.0]], [[1.0]], [1.0], [0.0], [0.0], 0.01, 5)
+
+
+def test_contact_pairs_nearest_and_empty():
+    a = [(0, [0.0, 0.0, 0.0]), (1, [10.0, 0.0, 0.0])]
+    b = [(7, [1.0, 0.0, 0.0]), (8, [9.0, 0.0, 0.0])]
+    pairs = dict(fem.contact_pairs(a, b))
+    # The paired value is the *index* into `b`, not its id.
+    assert pairs[0][0] == 0 and abs(pairs[0][1] - 1.0) < 1e-12
+    assert pairs[1][0] == 1
+    assert fem.contact_pairs(a, []) == [(0, None), (1, None)]
+
+
+def test_thermal_structural_free_expansion():
+    mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [2, 2, 2])
+    n = mesh.node_count()
+    # Kinematic minimum (no rigid-body motion): pin the origin, the x-axis end
+    # in y/z and the y-axis end in z; the body then expands freely.
+    def at(x, y, z):
+        e = 1e-9
+        return mesh.nodes_in_box([x - e, y - e, z - e], [x + e, y + e, z + e])[0]
+
+    origin, xend, yend = at(0, 0, 0), at(1, 0, 0), at(0, 1, 0)
+    bcs = [(origin, k, 0.0) for k in range(3)]
+    bcs += [(xend, 1, 0.0), (xend, 2, 0.0), (yend, 2, 0.0)]
+    sol = fem.solve_thermal_structural(mesh, "3d", 1.0, 0.3, 1e-3, [10.0] * n, bcs)
+    far = xend
+    # Free expansion: u_x(1,0,0) = alpha * dT * L = 1e-2.
+    assert abs(sol.values[3 * far] - 1e-2) < 1e-6
+    with pytest.raises(RuntimeError):
+        fem.solve_thermal_structural(mesh, "3d", 1.0, 0.3, 1e-3, [1.0], bcs)
+
+
+def test_contact_augmented_lagrangian_holds_the_wall():
+    # Spring K=10 pushed toward -x by 4; wall at x >= 0: u -> 0, reaction 4.
+    u, lam = fem.contact_augmented_lagrangian([[10.0]], [-4.0], [(0, 0.0)])
+    assert abs(u[0]) < 1e-6 and abs(lam[0] - 4.0) < 1e-3
+    with pytest.raises(RuntimeError):
+        fem.contact_augmented_lagrangian([[10.0]], [-4.0], [(3, 0.0)])
+    with pytest.raises(RuntimeError):
+        fem.contact_augmented_lagrangian([[10.0]], [-4.0], [(0, 0.0)], penalty=-1.0)
+
+
+def test_fsi_interface_loads_resultant_matches_pressure_times_area():
+    # Unit cube; uniform pressure 5 on the top face (z = 1), area 1 => total
+    # outward force 5 in +z, summed over the interface nodes.
+    mesh = fem.Mesh.box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [2, 2, 2])
+    top = mesh.nodes_on_plane(2, 1.0, 1e-9)
+    interface = [(n, n) for n in top]
+    pressure = [5.0] * mesh.node_count()
+    loads = fem.fsi_interface_loads(mesh, interface, pressure)
+    assert len(loads) == 3 * mesh.node_count()
+    fz = sum(loads[3 * n + 2] for n in range(mesh.node_count()))
+    assert abs(abs(fz) - 5.0) < 1e-9
+    with pytest.raises(RuntimeError):
+        fem.fsi_interface_loads(mesh, [(0, 10_000)], pressure)
+
+
+def test_gpu_api_is_consistent_with_build():
+    if not fem.gpu_enabled():
+        with pytest.raises(RuntimeError):
+            fem.gpu_solve_cg([(0, 0, 1.0)], [1.0])
+        return
+    try:
+        name = fem.gpu_adapter()
+    except RuntimeError:
+        pytest.skip("no GPU adapter")
+    assert name
+    n = 30
+    trip = []
+    for i in range(n * n):
+        trip.append((i, i, 4.0))
+        if i % n + 1 < n:
+            trip += [(i, i + 1, -1.0), (i + 1, i, -1.0)]
+        if i + n < n * n:
+            trip += [(i, i + n, -1.0), (i + n, i, -1.0)]
+    x, its, res = fem.gpu_solve_cg(trip, [1.0] * (n * n))
+    assert res <= 1e-10 and its > 0 and len(x) == n * n

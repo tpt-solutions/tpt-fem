@@ -103,6 +103,18 @@ m0.to_pyvista().plot(scalars="mode")
 | `solve_poisson(...)` → `PoissonSolution` | Steady heat conduction; constant or callable source. `.values` is `(n_nodes,)`; `.to_numpy()` / `.to_pyvista()` for interop. |
 | `solve_elasticity(...)` → `ElasticitySolution` | Linear statics; `model` ∈ `bar`/`plane-stress`/`plane-strain`/`3d`. `.values` is `(n_nodes * dim,)`; `.to_numpy()` is `(n_nodes, dim)`. |
 | `solve_modal(...)` → `ModalSolution` | Natural-vibration eigenproblem; indexable / iterable over `ModeShape` objects (`.omega2`, `.omega`, `.to_numpy()`, `.to_pyvista()`). `.omega2s()` / `.frequencies()` list ω² / ω. |
+| `solve_transient_heat(mesh, k, rho_c, dt, nsteps, initial, bcs, source=0.0, theta=1.0)` → `HeatHistory` | Transient heat conduction (θ-method); `.times`, `hist[i]` (field at step i), `.to_numpy()` → `(nsteps+1, n_nodes)`. |
+| `j2_uniaxial_response(young, poisson, yield_stress, strains, iso_hardening=0, kin_hardening=0)` | Axial stress of a J2 elastic-plastic material along a monotonic strain path. |
+| `neo_hookean_uniaxial(mu, stretches)` | Nominal stress of an incompressible neo-Hookean solid in uniaxial extension. |
+| `solve_darcy(mesh, permeability, bcs)` → `PoissonSolution` | Steady Darcy flow; `bcs` are `(node, pressure)`. |
+| `solve_stokes(mesh, viscosity, body_force, bcs, penalty=1e6)` → `(ElasticitySolution, PoissonSolution)` | Steady Stokes flow (velocity, pressure); `bcs` are `(node, component, value)`. |
+| `solve_thermal_structural(mesh, model, young, poisson, alpha, delta_t, bcs)` → `ElasticitySolution` | Free thermal expansion under a per-node temperature rise. |
+| `contact_augmented_lagrangian(K, f, constraints, penalty=1e4, max_iter=50, tol=1e-9)` | Solve `K u = f` with `u[dof] >= lower` constraints; returns `(u, contact_forces)`. |
+| `gpu_solve_cg(triplets, rhs, tol=1e-10)` → `(x, iterations, rel_residual)` | GPU Jacobi-PCG for SPD sparse systems (`(row, col, value)` triplets). Needs a build with `maturin develop --features gpu`; `gpu_enabled()` / `gpu_adapter()` tell you what you have. |
+| `fsi_interface_loads(structure, interface, fluid_pressure)` | Consistent structure load vector from interface pressures; `interface` pairs `(structure_node, fluid_node)`. |
+| `contact_pairs(a, b)` | Nearest point of `b` (index + distance) for every `(id, xyz)` point of `a`. |
+| `laminate_abd(plies)` | 6x6 ABD matrix from a stack of `(e1, e2, nu12, g12, thickness, angle_deg)` plies. |
+| `newmark(M, C, K, u0, v0, load, dt, nsteps, beta=0.25, gamma=0.5)` | Newmark-beta time integration of a small dense system; returns `[(t, u), ...]`. |
 
 ## Position in the crate stack
 
